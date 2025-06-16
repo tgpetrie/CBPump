@@ -1,0 +1,1154 @@
+import os
+import argparse
+from flask import Flask, jsonify, request
+from flask_socketio import SocketIO, emit
+from flask_cors import CORS
+import requests
+import time
+import threading
+from collections import defaultdict, deque
+import logging
+from datetime import datetime
+
+# CBMo4ers Crypto Dashboard Backend
+# Data Sources: Public Coinbase Exchange API + CoinGecko (backup)
+# No API keys required - uses public market data only
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+# Flask App Setup
+app = Flask(__name__)
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'crypto-dashboard-secret')
+socketio = SocketIO(app, cors_allowed_origins="*")
+CORS(app)
+
+# Dynamic Configuration with Environment Variables and Defaults
+CONFIG = {
+    'CACHE_TTL': int(os.environ.get('CACHE_TTL', 60)),  # Cache for 60 seconds
+    'INTERVAL_MINUTES': int(os.environ.get('INTERVAL_MINUTES', 3)),  # Calculate changes over 3 minutes
+    'MAX_PRICE_HISTORY': int(os.environ.get('MAX_PRICE_HISTORY', 20)),  # Keep last 20 data points
+    'PORT': int(os.environ.get('PORT', 5001)),  # Default port
+    'HOST': os.environ.get('HOST', '0.0.0.0'),  # Default host
+    'DEBUG': os.environ.get('DEBUG', 'False').lower() == 'true',  # Debug mode
+    'UPDATE_INTERVAL': int(os.environ.get('UPDATE_INTERVAL', 60)),  # Background update interval in seconds
+    'MAX_COINS_PER_CATEGORY': int(os.environ.get('MAX_COINS_PER_CATEGORY', 15)),  # Max coins to return
+    'MIN_VOLUME_THRESHOLD': int(os.environ.get('MIN_VOLUME_THRESHOLD', 1000000)),  # Minimum volume for banner
+    'MIN_CHANGE_THRESHOLD': float(os.environ.get('MIN_CHANGE_THRESHOLD', 1.0)),  # Minimum % change for banner
+    'API_TIMEOUT': int(os.environ.get('API_TIMEOUT', 10)),  # API request timeout
+    'CHART_DAYS_LIMIT': int(os.environ.get('CHART_DAYS_LIMIT', 30)),  # Max days for chart data
+}
+
+# Cache and price history storage
+cache = {
+    "data": None,
+    "timestamp": 0,
+    "ttl": CONFIG['CACHE_TTL']
+}
+
+# Store price history for interval calculations
+price_history = defaultdict(lambda: deque(maxlen=CONFIG['MAX_PRICE_HISTORY']))
+
+def log_config():
+    """Log current configuration"""
+    logging.info("=== CBMo4ers Configuration ===")
+    for key, value in CONFIG.items():
+        logging.info(f"{key}: {value}")
+    logging.info("===============================")
+
+# =============================================================================
+# DYNAMIC PORT MANAGEMENT
+# =============================================================================
+
+def find_available_port(start_port=5001, max_attempts=10):
+    """Find an available port starting from start_port"""
+    import socket
+    
+    for port in range(start_port, start_port + max_attempts):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.bind(('0.0.0.0', port))
+                logging.info(f"Found available port: {port}")
+                return port
+            except OSError:
+                logging.warning(f"Port {port} is in use, trying next...")
+                continue
+    
+    logging.error(f"Could not find available port in range {start_port}-{start_port + max_attempts}")
+    return None
+
+def kill_process_on_port(port):
+    """Kill process using the specified port"""
+    import subprocess
+    import sys
+    
+    try:
+        if sys.platform.startswith('darwin') or sys.platform.startswith('linux'):
+            # macOS/Linux
+            result = subprocess.run(['lsof', '-ti', f':{port}'], 
+                                 capture_output=True, text=True)
+            if result.returncode == 0 and result.stdout.strip():
+                pids = result.stdout.strip().split('\n')
+                for pid in pids:
+                    subprocess.run(['kill', '-9', pid])
+                    logging.info(f"Killed process {pid} on port {port}")
+                return True
+        elif sys.platform.startswith('win'):
+            # Windows
+            result = subprocess.run(['netstat', '-ano'], capture_output=True, text=True)
+            for line in result.stdout.split('\n'):
+                if f':{port}' in line and 'LISTENING' in line:
+                    pid = line.strip().split()[-1]
+                    subprocess.run(['taskkill', '/F', '/PID', pid])
+                    logging.info(f"Killed process {pid} on port {port}")
+                    return True
+    except Exception as e:
+        logging.error(f"Error killing process on port {port}: {e}")
+    
+    return False
+
+# =============================================================================
+# DYNAMIC CONFIGURATION FUNCTIONS
+# =============================================================================
+
+def update_config(new_config):
+    """Update configuration at runtime"""
+    global CONFIG
+    old_config = CONFIG.copy()
+    
+    for key, value in new_config.items():
+        if key in CONFIG:
+            # Type conversion based on existing type
+            if isinstance(CONFIG[key], int):
+                CONFIG[key] = int(value)
+            elif isinstance(CONFIG[key], float):
+                CONFIG[key] = float(value)
+            elif isinstance(CONFIG[key], bool):
+                CONFIG[key] = str(value).lower() == 'true'
+            else:
+                CONFIG[key] = value
+            
+            logging.info(f"Config updated: {key} = {old_config[key]} -> {CONFIG[key]}")
+    
+    # Update cache TTL if changed
+    if 'CACHE_TTL' in new_config:
+        cache['ttl'] = CONFIG['CACHE_TTL']
+    
+    # Update price history max length if changed
+    if 'MAX_PRICE_HISTORY' in new_config:
+        new_maxlen = CONFIG['MAX_PRICE_HISTORY']
+        for symbol in price_history:
+            # Create new deque with updated maxlen
+            old_data = list(price_history[symbol])
+            price_history[symbol] = deque(old_data[-new_maxlen:], maxlen=new_maxlen)
+
+# =============================================================================
+# EXISTING FUNCTIONS (Updated with dynamic config)
+# =============================================================================
+
+def get_coinbase_prices():
+    """Fetch current prices from Coinbase"""
+    try:
+        products_url = "https://api.exchange.coinbase.com/products"
+        products_response = requests.get(products_url, timeout=CONFIG['API_TIMEOUT'])
+        if products_response.status_code == 200:
+            products = products_response.json()
+            current_prices = {}
+            
+            for product in products:
+                if product.get("quote_currency") == "USD" and product.get("status") == "online":
+                    symbol = product["id"]
+                    ticker_url = f"https://api.exchange.coinbase.com/products/{symbol}/ticker"
+                    try:
+                        ticker_response = requests.get(ticker_url, timeout=3)
+                        if ticker_response.status_code == 200:
+                            ticker_data = ticker_response.json()
+                            price = float(ticker_data.get('price', 0))
+                            if price > 0:
+                                current_prices[symbol] = price
+                    except Exception as ticker_error:
+                        logging.warning(f"Failed to get ticker for {symbol}: {ticker_error}")
+                        continue
+            
+            logging.info(f"Successfully fetched {len(current_prices)} prices from Coinbase")
+            return current_prices
+        else:
+            logging.error(f"Coinbase products API Error: {products_response.status_code}")
+            return {}
+    except Exception as e:
+        logging.error(f"Error fetching current prices from Coinbase: {e}")
+        return {}
+
+def calculate_interval_changes(current_prices):
+    """Calculate price changes over dynamic intervals"""
+    current_time = time.time()
+    interval_seconds = CONFIG['INTERVAL_MINUTES'] * 60
+    
+    # Update price history with current prices
+    for symbol, price in current_prices.items():
+        if price > 0:
+            price_history[symbol].append((current_time, price))
+    
+    # Calculate changes for each symbol
+    formatted_data = []
+    for symbol, price in current_prices.items():
+        if price <= 0:
+            continue
+            
+        history = price_history[symbol]
+        if len(history) < 2:
+            continue
+            
+        # Find price from interval ago (or earliest available)
+        interval_price = None
+        interval_time = None
+        
+        for timestamp, historical_price in history:
+            if current_time - timestamp >= interval_seconds:
+                interval_price = historical_price
+                interval_time = timestamp
+                break
+        
+        # If no interval data, use oldest available
+        if interval_price is None and len(history) >= 2:
+            interval_price = history[0][1]
+            interval_time = history[0][0]
+        
+        if interval_price is None or interval_price <= 0:
+            continue
+            
+        # Calculate percentage change
+        price_change = ((price - interval_price) / interval_price) * 100
+        actual_interval_minutes = (current_time - interval_time) / 60 if interval_time else 0
+        
+        # Only include significant changes (configurable threshold)
+        if abs(price_change) >= 0.01:
+            formatted_data.append({
+                "symbol": symbol,
+                "current_price": price,
+                "initial_price_3min": interval_price,
+                "price_change_percentage_3min": price_change,
+                "actual_interval_minutes": actual_interval_minutes
+            })
+    
+    return formatted_data
+
+def get_current_prices():
+    """Fetch current prices from Coinbase with CoinGecko fallback"""
+    try:
+        return get_coinbase_prices()
+    except Exception as e:
+        logging.error(f"Coinbase API failed: {e}, trying CoinGecko backup...")
+        return get_coingecko_prices()
+
+def get_coingecko_prices():
+    """Fetch current prices from CoinGecko as backup"""
+    try:
+        url = "https://api.coingecko.com/api/v3/coins/markets"
+        params = {
+            'vs_currency': 'usd',
+            'order': 'market_cap_desc',
+            'per_page': 50,
+            'page': 1,
+            'sparkline': False,
+            'price_change_percentage': '1h,24h'
+        }
+        response = requests.get(url, params=params, timeout=CONFIG['API_TIMEOUT'])
+        if response.status_code == 200:
+            coins = response.json()
+            current_prices = {}
+            
+            for coin in coins:
+                symbol = f"{coin['symbol'].upper()}-USD"
+                current_prices[symbol] = float(coin['current_price'])
+            
+            logging.info(f"Successfully fetched {len(current_prices)} prices from CoinGecko backup")
+            return current_prices
+        else:
+            logging.error(f"CoinGecko API Error: {response.status_code}")
+            return {}
+    except Exception as e:
+        logging.error(f"Error fetching prices from CoinGecko: {e}")
+        return {}
+
+def get_24h_top_movers():
+    """Fetch top 24h gainers/losers for banner"""
+    try:
+        return get_coingecko_24h_top_movers()
+    except Exception as e:
+        logging.error(f"CoinGecko 24h top movers API failed: {e}, trying Coinbase backup...")
+        return get_coinbase_24h_top_movers()
+
+def get_coingecko_24h_top_movers():
+    """Fetch 24h top gainers/losers from CoinGecko for banner"""
+    try:
+        url = "https://api.coingecko.com/api/v3/coins/markets"
+        params = {
+            'vs_currency': 'usd',
+            'order': 'market_cap_desc',
+            'per_page': 100,
+            'page': 1,
+            'sparkline': False,
+            'price_change_percentage': '1h,24h'
+        }
+        response = requests.get(url, params=params, timeout=CONFIG['API_TIMEOUT'])
+        if response.status_code == 200:
+            coins = response.json()
+            formatted_data = []
+            
+            for coin in coins:
+                try:
+                    current_price = float(coin['current_price'])
+                    price_change_24h = float(coin.get('price_change_percentage_24h', 0))
+                    price_change_1h = float(coin.get('price_change_percentage_1h_in_currency', 0))
+                    volume_24h = float(coin['total_volume'])
+                    market_cap = float(coin.get('market_cap', 0))
+                    
+                    # Calculate initial prices
+                    initial_price_24h = current_price / (1 + (price_change_24h / 100)) if price_change_24h != -100 else current_price
+                    initial_price_1h = current_price / (1 + (price_change_1h / 100)) if price_change_1h != -100 else current_price
+                    
+                    # Only include significant moves (> 1% change) and decent volume
+                    if abs(price_change_24h) >= CONFIG['MIN_CHANGE_THRESHOLD'] and volume_24h > CONFIG['MIN_VOLUME_THRESHOLD']:
+                        formatted_data.append({
+                            "symbol": f"{coin['symbol'].upper()}-USD",
+                            "current_price": current_price,
+                            "initial_price_24h": initial_price_24h,
+                            "initial_price_1h": initial_price_1h,
+                            "price_change_24h": price_change_24h,
+                            "price_change_1h": price_change_1h,
+                            "volume_24h": volume_24h,
+                            "market_cap": market_cap
+                        })
+                except Exception as e:
+                    logging.warning(f"Error processing 24h data for {coin.get('symbol', 'unknown')}: {e}")
+                    continue
+            
+            # Sort by absolute percentage change (biggest movers first)
+            formatted_data.sort(key=lambda x: abs(x["price_change_24h"]), reverse=True)
+            
+            # Get top gainers and losers
+            gainers_24h = [coin for coin in formatted_data if coin["price_change_24h"] > 0][:10]
+            losers_24h = [coin for coin in formatted_data if coin["price_change_24h"] < 0][:10]
+            
+            # Mix them for banner (alternate between gainers and losers)
+            banner_mix = []
+            max_length = max(len(gainers_24h), len(losers_24h))
+            for i in range(max_length):
+                if i < len(gainers_24h):
+                    banner_mix.append(gainers_24h[i])
+                if i < len(losers_24h):
+                    banner_mix.append(losers_24h[i])
+            
+            logging.info(f"Successfully fetched 24h top movers: {len(gainers_24h)} gainers, {len(losers_24h)} losers")
+            return banner_mix[:20]
+            
+        else:
+            logging.error(f"CoinGecko 24h top movers API Error: {response.status_code}")
+            return []
+    except Exception as e:
+        logging.error(f"Error fetching 24h top movers from CoinGecko: {e}")
+        return []
+
+def get_coinbase_24h_top_movers():
+    """Fetch 24h top movers from Coinbase as backup"""
+    try:
+        products_url = "https://api.exchange.coinbase.com/products"
+        products_response = requests.get(products_url, timeout=CONFIG['API_TIMEOUT'])
+        if products_response.status_code != 200:
+            return []
+
+        products = products_response.json()
+        usd_products = [p for p in products if p["quote_currency"] == "USD" and p["status"] == "online"]
+        formatted_data = []
+
+        for product in usd_products[:50]:
+            try:
+                # Get 24h stats
+                stats_url = f"https://api.exchange.coinbase.com/products/{product['id']}/stats"
+                stats_response = requests.get(stats_url, timeout=5)
+                if stats_response.status_code != 200:
+                    continue
+                stats_data = stats_response.json()
+
+                # Get current price
+                ticker_url = f"https://api.exchange.coinbase.com/products/{product['id']}/ticker"
+                ticker_response = requests.get(ticker_url, timeout=3)
+                if ticker_response.status_code != 200:
+                    continue
+                ticker_data = ticker_response.json()
+
+                current_price = float(ticker_data.get('price', 0))
+                volume_24h = float(stats_data.get('volume', 0))
+                open_24h = float(stats_data.get('open', 0))
+                
+                if current_price > 0 and open_24h > 0:
+                    price_change_24h = ((current_price - open_24h) / open_24h) * 100
+                    
+                    # Estimate 1h change
+                    price_1h_estimate = current_price - ((current_price - open_24h) * 0.04)
+                    price_change_1h = ((current_price - price_1h_estimate) / price_1h_estimate) * 100 if price_1h_estimate > 0 else 0
+                    
+                    # Only include significant moves
+                    if abs(price_change_24h) >= CONFIG['MIN_CHANGE_THRESHOLD'] and volume_24h > CONFIG['MIN_VOLUME_THRESHOLD']:
+                        formatted_data.append({
+                            "symbol": product["id"],
+                            "current_price": current_price,
+                            "initial_price_24h": open_24h,
+                            "initial_price_1h": price_1h_estimate,
+                            "price_change_24h": price_change_24h,
+                            "price_change_1h": price_change_1h,
+                            "volume_24h": volume_24h,
+                            "market_cap": 0
+                        })
+            except Exception as e:
+                logging.warning(f"Error processing Coinbase 24h data for {product['id']}: {e}")
+                continue
+
+            time.sleep(0.05)  # Rate limiting
+
+        # Sort and mix gainers/losers
+        formatted_data.sort(key=lambda x: abs(x["price_change_24h"]), reverse=True)
+        gainers_24h = [coin for coin in formatted_data if coin["price_change_24h"] > 0][:10]
+        losers_24h = [coin for coin in formatted_data if coin["price_change_24h"] < 0][:10]
+        
+        banner_mix = []
+        max_length = max(len(gainers_24h), len(losers_24h))
+        for i in range(max_length):
+            if i < len(gainers_24h):
+                banner_mix.append(gainers_24h[i])
+            if i < len(losers_24h):
+                banner_mix.append(losers_24h[i])
+        
+        logging.info(f"Successfully fetched Coinbase 24h top movers: {len(gainers_24h)} gainers, {len(losers_24h)} losers")
+        return banner_mix[:20]
+    except Exception as e:
+        logging.error(f"Error fetching 24h top movers from Coinbase: {e}")
+        return []
+
+# =============================================================================
+# DATA FORMATTING FUNCTIONS
+# =============================================================================
+
+def format_crypto_data(crypto_data):
+    """Format 3-minute crypto data for frontend with detailed price tracking"""
+    return [
+        {
+            "symbol": coin["symbol"],
+            "current": coin["current_price"],
+            "initial_3min": coin["initial_price_3min"],
+            "gain": coin["price_change_percentage_3min"],
+            "interval_minutes": round(coin["actual_interval_minutes"], 1)
+        }
+        for coin in crypto_data
+    ]
+
+def format_crypto_data_with_charts(crypto_data):
+    """Format crypto data with chart indicators"""
+    formatted_data = []
+    
+    for coin in crypto_data:
+        symbol = coin["symbol"]
+        current_price = coin["current_price"]
+        
+        # Get mini chart data (last 6 hours)
+        mini_chart = get_historical_chart_data(symbol, 1)  # 1 day, but we'll use last few hours
+        chart_preview = mini_chart[-6:] if len(mini_chart) >= 6 else mini_chart
+        
+        # Simple trend indicator
+        trend_indicator = "neutral"
+        if len(chart_preview) >= 2:
+            price_change = (chart_preview[-1]['price'] - chart_preview[0]['price']) / chart_preview[0]['price'] * 100
+            if price_change > 1:
+                trend_indicator = "bullish"
+            elif price_change < -1:
+                trend_indicator = "bearish"
+        
+        formatted_data.append({
+            "symbol": symbol,
+            "current": current_price,
+            "initial_3min": coin["initial_price_3min"],
+            "gain": coin["price_change_percentage_3min"],
+            "interval_minutes": round(coin["actual_interval_minutes"], 1),
+            "chart_preview": [point['price'] for point in chart_preview],
+            "trend_indicator": trend_indicator,
+            "has_chart_data": len(chart_preview) > 0
+        })
+    
+    return formatted_data
+
+def format_24h_banner_data(banner_data):
+    """Format 24h banner data for frontend"""
+    return [
+        {
+            "symbol": coin["symbol"],
+            "current_price": coin["current_price"],
+            "initial_price_24h": coin["initial_price_24h"],
+            "initial_price_1h": coin["initial_price_1h"],
+            "price_change_24h": coin["price_change_24h"],
+            "price_change_1h": coin["price_change_1h"],
+            "volume_24h": coin["volume_24h"],
+            "market_cap": coin.get("market_cap", 0)
+        }
+        for coin in banner_data
+    ]
+
+# =============================================================================
+# MAIN DATA PROCESSING FUNCTION
+# =============================================================================
+
+def get_crypto_data():
+    """Main function to fetch and process crypto data"""
+    current_time = time.time()
+    
+    # Check cache first
+    if cache["data"] and (current_time - cache["timestamp"]) < cache["ttl"]:
+        return cache["data"]
+    
+    try:
+        # Get current prices for 3-minute calculations
+        current_prices = get_current_prices()
+        if not current_prices:
+            logging.warning("No current prices available")
+            return None
+            
+        # Calculate 3-minute interval changes (unique feature)
+        crypto_data = calculate_interval_changes(current_prices)
+        
+        if not crypto_data:
+            logging.warning(f"No crypto data available - {len(current_prices)} current prices, {len(price_history)} symbols with history")
+            return None
+        
+        # Separate gainers and losers based on 3-minute changes
+        gainers = [coin for coin in crypto_data if coin.get("price_change_percentage_3min", 0) > 0]
+        losers = [coin for coin in crypto_data if coin.get("price_change_percentage_3min", 0) < 0]
+        
+        # Sort by 3-minute percentage change
+        gainers.sort(key=lambda x: x["price_change_percentage_3min"], reverse=True)
+        losers.sort(key=lambda x: x["price_change_percentage_3min"])
+        
+        # Get top movers (mix of gainers and losers)
+        top_gainers = gainers[:8]
+        top_losers = losers[:8]
+        top24h = (top_gainers + top_losers)[:15]
+        
+        # Get 24h top movers for banner
+        banner_24h_movers = get_24h_top_movers()
+        
+        result = {
+            "gainers": format_crypto_data(gainers[:15]),
+            "losers": format_crypto_data(losers[:15]),
+            "top24h": format_crypto_data(top24h),
+            "banner": format_24h_banner_data(banner_24h_movers[:20])
+        }
+        
+        # Update cache
+        cache["data"] = result
+        cache["timestamp"] = current_time
+        
+        logging.info(f"Successfully processed data: {len(result['gainers'])} gainers, {len(result['losers'])} losers, {len(result['banner'])} banner items")
+        return result
+        
+    except Exception as e:
+        logging.error(f"Error in get_crypto_data: {e}")
+        return None
+
+# =============================================================================
+# ADDITIONAL FUNCTIONS
+# =============================================================================
+
+def get_historical_chart_data(symbol, days=7):
+    """Fetch historical price data for charts"""
+    try:
+        # Convert symbol format for CoinGecko (remove -USD suffix)
+        coin_id = symbol.replace('-USD', '').lower()
+        
+        # Enhanced symbol mapping to CoinGecko IDs
+        symbol_mapping = {
+            'btc': 'bitcoin',
+            'eth': 'ethereum', 
+            'sol': 'solana',
+            'ada': 'cardano',
+            'dot': 'polkadot',
+            'link': 'chainlink',
+            'matic': 'polygon',
+            'avax': 'avalanche-2',
+            'atom': 'cosmos',
+            'algo': 'algorand',
+            'xrp': 'ripple',
+            'doge': 'dogecoin',
+            'shib': 'shiba-inu',
+            'uni': 'uniswap',
+            'aave': 'aave',
+            'bch': 'bitcoin-cash',
+            'ltc': 'litecoin',
+            'icp': 'internet-computer',
+            'fet': 'fetch-ai',
+            'op': 'optimism',
+            'arb': 'arbitrum',
+            'jup': 'jupiter-exchange-solana',
+            'stx': 'stacks',
+            'tia': 'celestia',
+            'sui': 'sui',
+            'apt': 'aptos',
+            'near': 'near',
+            'inj': 'injective-protocol',
+            'sei': 'sei-network',
+            'wld': 'worldcoin-wld',
+            'pyth': 'pyth-network',
+            'rndr': 'render-token'
+        }
+        
+        coin_id = symbol_mapping.get(coin_id, coin_id)
+        
+        # Log the coin ID being requested
+        logging.info(f"Fetching chart data for {symbol} -> CoinGecko ID: {coin_id}")
+        
+        url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart"
+        params = {
+            'vs_currency': 'usd',
+            'days': days,
+            'interval': 'hourly' if days <= 7 else 'daily'
+        }
+        
+        # Add User-Agent header to avoid rate limiting
+        headers = {
+            'User-Agent': 'CBMo4ers-Dashboard/1.0 (https://github.com/cbmo4ers)'
+        }
+        
+        response = requests.get(url, params=params, headers=headers, timeout=15)
+        
+        if response.status_code == 200:
+            data = response.json()
+            
+            # Format chart data
+            prices = data.get('prices', [])
+            volumes = data.get('total_volumes', [])
+            
+            if not prices:
+                logging.warning(f"No price data returned for {symbol}")
+                return []
+            
+            chart_data = []
+            for i, price_point in enumerate(prices):
+                timestamp = price_point[0]
+                price = price_point[1]
+                volume = volumes[i][1] if i < len(volumes) else 0
+                
+                chart_data.append({
+                    'timestamp': timestamp,
+                    'datetime': datetime.fromtimestamp(timestamp / 1000).isoformat(),
+                    'price': round(price, 6),
+                    'volume': round(volume, 2)
+                })
+            
+            logging.info(f"Successfully fetched {len(chart_data)} chart points for {symbol}")
+            return chart_data
+            
+        elif response.status_code == 404:
+            logging.warning(f"Coin not found on CoinGecko: {coin_id} (from {symbol})")
+            return []
+        else:
+            logging.error(f"CoinGecko chart API Error for {symbol}: {response.status_code} - {response.text}")
+            return []
+            
+    except requests.RequestException as e:
+        logging.error(f"Network error fetching chart data for {symbol}: {e}")
+        return []
+    except Exception as e:
+        logging.error(f"Error fetching chart data for {symbol}: {e}")
+        return []
+
+def get_trending_coins():
+    """Get trending/recommended coins to watch"""
+    try:
+        # Get trending coins from CoinGecko
+        trending_url = "https://api.coingecko.com/api/v3/search/trending"
+        trending_response = requests.get(trending_url, timeout=10)
+        
+        # Get top gainers for additional recommendations
+        markets_url = "https://api.coingecko.com/api/v3/coins/markets"
+        params = {
+            'vs_currency': 'usd',
+            'order': 'percent_change_24h_desc',
+            'per_page': 20,
+            'page': 1,
+            'sparkline': False,
+            'price_change_percentage': '24h,7d'
+        }
+        markets_response = requests.get(markets_url, params=params, timeout=10)
+        
+        recommendations = []
+        
+        # Process trending coins
+        if trending_response.status_code == 200:
+            trending_data = trending_response.json()
+            for coin in trending_data.get('coins', [])[:5]:
+                coin_info = coin.get('item', {})
+                recommendations.append({
+                    'symbol': f"{coin_info.get('symbol', '').upper()}-USD",
+                    'name': coin_info.get('name', ''),
+                    'rank': coin_info.get('market_cap_rank', 0),
+                    'reason': 'trending',
+                    'score': coin_info.get('score', 0)
+                })
+        
+        # Process top gainers
+        if markets_response.status_code == 200:
+            markets_data = markets_response.json()
+            for coin in markets_data[:10]:
+                if coin.get('price_change_percentage_24h', 0) > 5:  # Only significant gainers
+                    recommendations.append({
+                        'symbol': f"{coin['symbol'].upper()}-USD",
+                        'name': coin['name'],
+                        'current_price': coin['current_price'],
+                        'change_24h': coin.get('price_change_percentage_24h', 0),
+                        'change_7d': coin.get('price_change_percentage_7d_in_currency', 0),
+                        'volume_24h': coin['total_volume'],
+                        'market_cap': coin['market_cap'],
+                        'rank': coin['market_cap_rank'],
+                        'reason': 'top_gainer'
+                    })
+        
+        # Remove duplicates and sort by relevance
+        seen_symbols = set()
+        unique_recommendations = []
+        for rec in recommendations:
+            if rec['symbol'] not in seen_symbols:
+                seen_symbols.add(rec['symbol'])
+                unique_recommendations.append(rec)
+        
+        logging.info(f"Generated {len(unique_recommendations)} coin recommendations")
+        return unique_recommendations[:15]
+        
+    except Exception as e:
+        logging.error(f"Error fetching trending coins: {e}")
+        return []
+
+def analyze_coin_potential(symbol, chart_data):
+    """Analyze a coin's potential based on historical data"""
+    try:
+        if len(chart_data) < 24:  # Need at least 24 hours of data
+            return {"score": 0, "signals": []}
+        
+        prices = [point['price'] for point in chart_data]
+        volumes = [point['volume'] for point in chart_data]
+        
+        signals = []
+        score = 50  # Base score
+        
+        # Price trend analysis
+        recent_prices = prices[-12:]  # Last 12 hours
+        if len(recent_prices) >= 2:
+            trend = (recent_prices[-1] - recent_prices[0]) / recent_prices[0] * 100
+            if trend > 5:
+                signals.append("Strong upward trend (+5%)")
+                score += 15
+            elif trend > 1:
+                signals.append("Positive trend (+1%)")
+                score += 8
+            elif trend < -5:
+                signals.append("Sharp decline (-5%)")
+                score -= 15
+            elif trend < -1:
+                signals.append("Negative trend (-1%)")
+                score -= 8
+        
+        # Volume analysis
+        recent_volume = sum(volumes[-6:]) / 6 if len(volumes) >= 6 else 0
+        older_volume = sum(volumes[-24:-6]) / 18 if len(volumes) >= 24 else recent_volume
+        
+        if recent_volume > older_volume * 1.5:
+            signals.append("High volume spike")
+            score += 10
+        elif recent_volume > older_volume * 1.2:
+            signals.append("Increased volume")
+            score += 5
+        
+        # Volatility check
+        if len(prices) >= 24:
+            price_changes = [abs(prices[i] - prices[i-1]) / prices[i-1] * 100 for i in range(1, len(prices))]
+            avg_volatility = sum(price_changes) / len(price_changes)
+            
+            if avg_volatility > 5:
+                signals.append("High volatility (>5%)")
+                score += 5
+            elif avg_volatility < 1:
+                signals.append("Low volatility (<1%)")
+                score -= 5
+        
+        # Support/resistance levels
+        max_price = max(prices[-24:])
+        min_price = min(prices[-24:])
+        current_price = prices[-1]
+        
+        if current_price > max_price * 0.95:
+            signals.append("Near resistance level")
+        elif current_price < min_price * 1.05:
+            signals.append("Near support level")
+            score += 5
+        
+        return {
+            "score": max(0, min(100, score)),
+            "signals": signals[:5],  # Top 5 signals
+            "trend_percentage": round(trend, 2) if 'trend' in locals() else 0,
+            "volume_change": round((recent_volume - older_volume) / older_volume * 100, 2) if older_volume > 0 else 0
+        }
+        
+    except Exception as e:
+        logging.error(f"Error analyzing coin potential for {symbol}: {e}")
+        return {"score": 0, "signals": []}
+
+# =============================================================================
+# API ROUTES
+# =============================================================================
+
+@app.route('/')
+def root():
+    """Root endpoint"""
+    return jsonify({
+        "service": "CBMo4ers Crypto Dashboard Backend",
+        "status": "running",
+        "version": "2.0.0",
+        "endpoints": [
+            "/api/health",
+            "/api/crypto", 
+            "/api/banner-1h",
+            "/api/chart/BTC-USD",
+            "/api/watchlist",
+            "/api/config"
+        ]
+    })
+
+@app.route('/api/crypto')
+def get_crypto_endpoint():
+    """Main crypto data endpoint with 3-minute tracking"""
+    try:
+        data = get_crypto_data()
+        if data:
+            return jsonify(data)
+        else:
+            return jsonify({"error": "No data available"}), 503
+    except Exception as e:
+        logging.error(f"Error in crypto endpoint: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/banner-1h')
+def get_banner_endpoint():
+    """24h banner data endpoint"""
+    try:
+        banner_data = get_24h_top_movers()
+        formatted_banner = format_24h_banner_data(banner_data)
+        return jsonify({
+            "banner": formatted_banner,
+            "count": len(formatted_banner),
+            "last_updated": datetime.now().isoformat()
+        })
+    except Exception as e:
+        logging.error(f"Error in banner endpoint: {e}")
+        return jsonify({"error": str(e)}), 500
+
+# Legacy routes for backward compatibility
+@app.route('/banner-1h')
+def banner_1h_legacy():
+    """Legacy banner endpoint - redirects to new API"""
+    return get_banner_endpoint()
+
+@app.route('/crypto')
+def get_crypto_legacy():
+    """Legacy crypto endpoint - redirects to new API"""
+    return get_crypto_endpoint()
+
+@app.route('/favicon.ico')
+def favicon():
+    return '', 204
+
+# New API endpoints
+
+@app.route('/api/chart/<symbol>')
+def get_chart(symbol):
+    """Get historical chart data for a specific coin"""
+    days = request.args.get('days', 7, type=int)
+    days = min(days, 30)  # Limit to 30 days max
+    
+    chart_data = get_historical_chart_data(symbol.upper(), days)
+    if not chart_data:
+        return jsonify({"error": f"No chart data available for {symbol}"}), 404
+    
+    # Add analysis
+    analysis = analyze_coin_potential(symbol, chart_data)
+    
+    return jsonify({
+        "symbol": symbol.upper(),
+        "days": days,
+        "data_points": len(chart_data),
+        "chart_data": chart_data,
+        "analysis": analysis
+    })
+
+@app.route('/api/watchlist')
+def get_watchlist():
+    """Get recommended coins to watch"""
+    recommendations = get_trending_coins()
+    
+    # Add chart analysis for each recommendation
+    for coin in recommendations:
+        chart_data = get_historical_chart_data(coin['symbol'], 3)  # 3 days for quick analysis
+        if chart_data:
+            analysis = analyze_coin_potential(coin['symbol'], chart_data)
+            coin['analysis'] = analysis
+            coin['chart_preview'] = chart_data[-24:] if len(chart_data) >= 24 else chart_data  # Last 24 hours
+        else:
+            coin['analysis'] = {"score": 0, "signals": []}
+            coin['chart_preview'] = []
+    
+    # Sort by analysis score
+    recommendations.sort(key=lambda x: x.get('analysis', {}).get('score', 0), reverse=True)
+    
+    return jsonify({
+        "recommendations": recommendations,
+        "updated_at": datetime.now().isoformat(),
+        "total_count": len(recommendations)
+    })
+
+@app.route('/api/popular-charts')
+def get_popular_charts():
+    """Get chart data for most popular coins"""
+    popular_symbols = ['BTC-USD', 'ETH-USD', 'SOL-USD', 'ADA-USD', 'DOT-USD', 'LINK-USD']
+    charts = {}
+    
+    for symbol in popular_symbols:
+        chart_data = get_historical_chart_data(symbol, 7)
+        if chart_data:
+            analysis = analyze_coin_potential(symbol, chart_data)
+            charts[symbol] = {
+                "chart_data": chart_data,
+                "analysis": analysis,
+                "current_price": chart_data[-1]['price'] if chart_data else 0
+            }
+    
+    return jsonify(charts)
+
+@app.route('/api/market-overview')
+def get_market_overview():
+    """Get overall market overview with key metrics"""
+    try:
+        # Get global market data
+        global_url = "https://api.coingecko.com/api/v3/global"
+        global_response = requests.get(global_url, timeout=10)
+        
+        overview = {}
+        if global_response.status_code == 200:
+            global_data = global_response.json().get('data', {})
+            overview = {
+                "total_market_cap_usd": global_data.get('total_market_cap', {}).get('usd', 0),
+                "total_volume_24h_usd": global_data.get('total_volume', {}).get('usd', 0),
+                "market_cap_change_24h": global_data.get('market_cap_change_percentage_24h_usd', 0),
+                "active_cryptocurrencies": global_data.get('active_cryptocurrencies', 0),
+                "markets": global_data.get('markets', 0),
+                "btc_dominance": global_data.get('market_cap_percentage', {}).get('btc', 0)
+            }
+        
+        # Get trending coins
+        trending = get_trending_coins()[:5]
+        
+        # Get fear & greed index (mock data since API requires key)
+        fear_greed_index = {
+            "value": 65,  # You can integrate real Fear & Greed API here
+            "classification": "Greed",
+            "last_update": datetime.now().isoformat()
+        }
+        
+        return jsonify({
+            "market_overview": overview,
+            "trending_coins": trending,
+            "fear_greed_index": fear_greed_index,
+            "last_updated": datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        logging.error(f"Error fetching market overview: {e}")
+        return jsonify({"error": "Failed to fetch market overview"}), 500
+
+@app.route('/api/config')
+def get_config():
+    """Get current configuration"""
+    return jsonify({
+        "config": CONFIG,
+        "cache_status": {
+            "has_data": cache["data"] is not None,
+            "age_seconds": time.time() - cache["timestamp"] if cache["timestamp"] > 0 else 0,
+            "ttl": cache["ttl"]
+        },
+        "price_history_status": {
+            "symbols_tracked": len(price_history),
+            "max_history_per_symbol": CONFIG['MAX_PRICE_HISTORY']
+        }
+    })
+
+@app.route('/api/config', methods=['POST'])
+def update_config_endpoint():
+    """Update configuration at runtime"""
+    try:
+        new_config = request.get_json()
+        if not new_config:
+            return jsonify({"error": "No configuration provided"}), 400
+        
+        update_config(new_config)
+        return jsonify({
+            "message": "Configuration updated successfully",
+            "new_config": CONFIG
+        })
+    except Exception as e:
+        logging.error(f"Error updating config: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/health')
+def health_check():
+    """Health check endpoint with detailed status"""
+    try:
+        # Test API connectivity
+        test_response = requests.get("https://api.coingecko.com/api/v3/ping", timeout=5)
+        api_status = "healthy" if test_response.status_code == 200 else "degraded"
+    except:
+        api_status = "unhealthy"
+    
+    return jsonify({
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "config": CONFIG,
+        "api_status": api_status,
+        "cache_age": time.time() - cache["timestamp"] if cache["timestamp"] > 0 else None,
+        "symbols_tracked": len(price_history),
+        "version": "2.0.0"
+    })
+
+@app.route('/api/clear-cache', methods=['POST'])
+def clear_cache():
+    """Clear all caches"""
+    global cache, price_history
+    
+    cache = {
+        "data": None,
+        "timestamp": 0,
+        "ttl": CONFIG['CACHE_TTL']
+    }
+    price_history.clear()
+    
+    logging.info("Cache and price history cleared")
+    return jsonify({"message": "Cache cleared successfully"})
+
+# =============================================================================
+# WEBSOCKET HANDLERS
+# =============================================================================
+
+@socketio.on('connect')
+def handle_connect():
+    logging.info('Client connected')
+    data = get_crypto_data()
+    if data:
+        emit('crypto_update', data)
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    logging.info('Client disconnected')
+
+def background_crypto_updates():
+    """Background thread to send periodic updates"""
+    while True:
+        try:
+            data = get_crypto_data()
+            if data:
+                socketio.emit('crypto_update', data)
+                logging.info(f"Sent update: {len(data['gainers'])} gainers, {len(data['losers'])} losers, {len(data['banner'])} banner items")
+        except Exception as e:
+            logging.error(f"Error in background update: {e}")
+        
+        time.sleep(CONFIG['UPDATE_INTERVAL'])  # Dynamic interval
+
+# =============================================================================
+# COMMAND LINE ARGUMENTS
+# =============================================================================
+
+def parse_arguments():
+    """Parse command line arguments"""
+    parser = argparse.ArgumentParser(description='CBMo4ers Crypto Dashboard Backend')
+    parser.add_argument('--port', type=int, help='Port to run the server on')
+    parser.add_argument('--host', type=str, help='Host to bind the server to')
+    parser.add_argument('--debug', action='store_true', help='Enable debug mode')
+    parser.add_argument('--interval', type=int, help='Price check interval in minutes')
+    parser.add_argument('--cache-ttl', type=int, help='Cache TTL in seconds')
+    parser.add_argument('--kill-port', action='store_true', help='Kill process on target port before starting')
+    parser.add_argument('--auto-port', action='store_true', help='Automatically find available port')
+    
+    return parser.parse_args()
+
+# =============================================================================
+# APPLICATION STARTUP
+# =============================================================================
+
+if __name__ == '__main__':
+    # Parse command line arguments
+    args = parse_arguments()
+    
+    # Update config from command line arguments
+    if args.port:
+        CONFIG['PORT'] = args.port
+    if args.host:
+        CONFIG['HOST'] = args.host
+    if args.debug:
+        CONFIG['DEBUG'] = True
+    if args.interval:
+        CONFIG['INTERVAL_MINUTES'] = args.interval
+    if args.cache_ttl:
+        CONFIG['CACHE_TTL'] = args.cache_ttl
+        cache['ttl'] = CONFIG['CACHE_TTL']
+    
+    # Log configuration
+    log_config()
+    
+    # Handle port conflicts
+    target_port = CONFIG['PORT']
+    
+    if args.kill_port:
+        logging.info(f"Attempting to kill process on port {target_port}")
+        kill_process_on_port(target_port)
+        time.sleep(2)  # Wait for process to be killed
+    
+    if args.auto_port:
+        available_port = find_available_port(target_port)
+        if available_port:
+            CONFIG['PORT'] = available_port
+        else:
+            logging.error("Could not find available port")
+            exit(1)
+    
+    logging.info("Starting CBMo4ers Crypto Dashboard Backend...")
+    
+    # Start background thread for periodic updates
+    background_thread = threading.Thread(target=background_crypto_updates)
+    background_thread.daemon = True
+    background_thread.start()
+    
+    logging.info("Background update thread started")
+    logging.info(f"Server starting on http://{CONFIG['HOST']}:{CONFIG['PORT']}")
+    
+    try:
+        socketio.run(app, 
+                    debug=CONFIG['DEBUG'], 
+                    host=CONFIG['HOST'], 
+                    port=CONFIG['PORT'])
+    except OSError as e:
+        if "Address already in use" in str(e):
+            logging.error(f"Port {CONFIG['PORT']} is in use. Try:")
+            logging.error(f"1. python3 app.py --kill-port")
+            logging.error(f"2. python3 app.py --auto-port")
+            logging.error(f"3. python3 app.py --port 5002")
+        else:
+            logging.error(f"Error starting server: {e}")
+        exit(1)
+
+else:
+    # Production mode for Vercel
+    log_config()
+    logging.info("Running in production mode (Vercel)")
