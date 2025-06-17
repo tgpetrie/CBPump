@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import '../index.css';
+import logobro from './logobro.png';
 
 const formatDecimal = (value, decimals = 2) => {
   // Add proper null/undefined checking
@@ -45,19 +46,18 @@ const StatusBadge = ({ isConnected, lastUpdate }) => (
 
 const ContinuousScrollingBanner = ({ data }) => {
   return (
-    <div className="overflow-hidden border shadow-2xl bg-gradient-to-r from-gray-950/95 via-black/90 to-gray-950/95 backdrop-blur-3xl rounded-3xl border-gray-800/60 shadow-black/80 hover:shadow-[#9C3391]/40 hover:shadow-2xl transition-all duration-500 relative group">
+    <div className="overflow-hidden bg-gradient-to-r from-black/80 via-black/60 to-black/80 rounded-3xl shadow-none border-none backdrop-blur-3xl animate-fade-in-up">
       {/* Glossy overlay effect */}
       <div className="absolute inset-0 pointer-events-none bg-gradient-to-b from-white/5 via-transparent to-black/20 rounded-3xl"></div>
-      
-      <div className="relative px-6 py-4 border-b bg-gradient-to-r from-gray-900/40 via-black/30 to-gray-900/40 border-gray-800/60 backdrop-blur-xl">
+      <div className="relative px-6 py-4">
         <div className="flex items-center gap-3">
           <span className="text-xl">🔥</span>
           <h3 className="text-base font-bold tracking-wide uppercase text-gray-200/90">
-            24H Top Movers • Live Market Feed
+            1H Volume Change • Live Market Feed
           </h3>
         </div>
       </div>
-      <div className="relative h-16 overflow-hidden backdrop-blur-2xl">
+      <div className="relative h-16 overflow-hidden">
         <div className="absolute inset-0 flex items-center">
           <div className="flex animate-scroll whitespace-nowrap">
             {/* First set of data */}
@@ -67,19 +67,19 @@ const ContinuousScrollingBanner = ({ data }) => {
                   href={`https://www.coinbase.com/price/${coin.symbol.split('-')[0].toLowerCase()}`} 
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center gap-4 transition-all duration-300 hover:scale-105 hover:shadow-lg hover:shadow-[#9C3391]/40 hover:drop-shadow-lg rounded-lg px-3 py-2 hover:bg-gray-900/40 backdrop-blur-xl"
+                  className="flex items-center gap-4 transition-all duration-300 hover:scale-105 hover:drop-shadow-lg rounded-lg px-3 py-2 hover:bg-gray-900/40 backdrop-blur-xl"
                 >
                   <div className="text-sm font-bold tracking-wide text-gray-300/90">
                     {coin.symbol}
                   </div>
                   <div className="font-mono text-sm text-gray-100/95">
-                    {formatCurrency(coin.current_price || coin.current)}
+                    {formatCurrency(coin.current_price)}
                   </div>
                   <div className={`flex items-center gap-1 text-sm font-bold ${
-                    (coin.price_change_24h || 0) >= 0 ? 'text-[#00CFFF]' : 'text-[#FF5E00]'
+                    (coin.volume_change_1h || 0) >= 0 ? 'text-[#00CFFF]' : 'text-[#FF5E00]'
                   }`}>
-                    <span>{(coin.price_change_24h || 0) >= 0 ? '🚀' : '📉'}</span>
-                    24h: {(coin.price_change_24h || 0) >= 0 ? '+' : ''}{formatDecimal(Math.abs(coin.price_change_24h || 0))}%
+                    <span>{(coin.volume_change_1h || 0) >= 0 ? '🚀' : '📉'}</span>
+                    1h: {(coin.volume_change_1h || 0) >= 0 ? '+' : ''}{formatDecimal(Math.abs(coin.volume_change_1h || 0))}%
                   </div>
                   <div className="text-xs text-gray-400">
                     Vol: {formatCurrency(coin.volume_24h || 0)}
@@ -94,19 +94,19 @@ const ContinuousScrollingBanner = ({ data }) => {
                   href={`https://www.coinbase.com/price/${coin.symbol.split('-')[0].toLowerCase()}`} 
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center gap-4 transition-all duration-300 hover:scale-105 hover:shadow-lg hover:shadow-[#9C3391]/40 hover:drop-shadow-lg rounded-lg px-3 py-2 hover:bg-gray-900/40 backdrop-blur-xl"
+                  className="flex items-center gap-4 transition-all duration-300 hover:scale-105 hover:drop-shadow-lg rounded-lg px-3 py-2 hover:bg-gray-900/40 backdrop-blur-xl"
                 >
                   <div className="text-sm font-bold tracking-wide text-gray-300/90">
                     {coin.symbol}
                   </div>
                   <div className="font-mono text-sm text-gray-100/95">
-                    {formatCurrency(coin.current_price || coin.current)}
+                    {formatCurrency(coin.current_price)}
                   </div>
                   <div className={`flex items-center gap-1 text-sm font-bold ${
-                    (coin.price_change_24h || 0) >= 0 ? 'text-[#00CFFF]' : 'text-[#FF5E00]'
+                    (coin.volume_change_1h || 0) >= 0 ? 'text-[#00CFFF]' : 'text-[#FF5E00]'
                   }`}>
-                    <span>{(coin.price_change_24h || 0) >= 0 ? '🚀' : '📉'}</span>
-                    24h: {(coin.price_change_24h || 0) >= 0 ? '+' : ''}{formatDecimal(Math.abs(coin.price_change_24h || 0))}%
+                    <span>{(coin.volume_change_1h || 0) >= 0 ? '🚀' : '📉'}</span>
+                    1h: {(coin.volume_change_1h || 0) >= 0 ? '+' : ''}{formatDecimal(Math.abs(coin.volume_change_1h || 0))}%
                   </div>
                   <div className="text-xs text-gray-400">
                     Vol: {formatCurrency(coin.volume_24h || 0)}
@@ -145,12 +145,12 @@ const CryptoRow = ({ coin, index }) => (
     </td>
     <td className="py-5 pl-4 pr-6 text-right">
       <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-sm font-bold transition-all duration-300 shadow-lg backdrop-blur-xl border group-hover:shadow-[#9C3391]/40 hover:drop-shadow-lg ${
-        coin.gain >= 0 
+        (coin.gain || 0) >= 0 
           ? 'bg-gray-900/40 text-[#FF3F7F] border-gray-700/50 shadow-[#FF3F7F]/15 hover:shadow-[#9C3391]/30 hover:bg-gray-800/50' 
           : 'bg-gray-900/40 text-[#FF3B30] border-gray-700/50 shadow-[#FF3B30]/15 hover:shadow-[#9C3391]/30 hover:bg-gray-800/50'
       }`}>
-        <span>{coin.gain >= 0 ? '📈' : '📉'}</span>
-        {formatDecimal(Math.abs(coin.gain))}%
+        <span>{(coin.gain || 0) >= 0 ? '📈' : '📉'}</span>
+        {(coin.gain || 0) >= 0 ? '+' : ''}{formatDecimal(Math.abs(coin.gain || 0))}%
       </div>
     </td>
   </tr>
@@ -202,53 +202,40 @@ const CryptoTable = ({ title, data, variant = "default" }) => (
   </div>
 );
 
-const TopMoversBar = ({ data }) => (
-  <div className="overflow-hidden border shadow-2xl bg-gradient-to-r from-gray-950/95 via-black/90 to-gray-950/95 backdrop-blur-3xl rounded-3xl border-gray-800/60 shadow-black/80 hover:shadow-[#9C3391]/40 hover:shadow-2xl transition-all duration-500 relative group">
-    {/* Glossy overlay effect */}
-    <div className="absolute inset-0 pointer-events-none bg-gradient-to-b from-white/5 via-transparent to-black/20 rounded-3xl"></div>
-    
-    <div className="relative px-6 py-4 border-b bg-gradient-to-r from-gray-900/40 via-black/30 to-gray-900/40 border-gray-800/60 backdrop-blur-xl">
-      <div className="flex items-center gap-3">
-        <span className="text-xl">🌐</span>
-        <h3 className="text-base font-bold tracking-wide uppercase text-gray-200/90">
-          Most Active 3min
-        </h3>
-      </div>
-    </div>
-    <div className="relative p-6 backdrop-blur-2xl">
-      <div className="flex gap-4 pb-2 overflow-x-auto scrollbar-hide">
-        {data.map((coin, index) => (
-          <a 
-            key={coin.symbol}
-            href={`https://www.coinbase.com/price/${coin.symbol.split('-')[0].toLowerCase()}`} 
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex-shrink-0 transition-all duration-300 group hover:scale-105 hover:-translate-y-1"
-          >
-            <div className={`px-5 py-4 rounded-2xl border transition-all duration-300 backdrop-blur-xl shadow-lg relative group-hover:shadow-[#9C3391]/40 hover:drop-shadow-lg ${
-              coin.gain >= 0 
-                ? 'bg-gray-900/40 border-gray-700/50 hover:bg-gray-800/50 shadow-[#FF3F7F]/15 hover:shadow-[#9C3391]/30' 
-                : 'bg-gray-900/40 border-gray-700/50 hover:bg-gray-800/50 shadow-[#FF3B30]/15 hover:shadow-[#9C3391]/30'
+const TopMoversBar = ({ data }) => {
+  // Countdown timer state (30 seconds, resets on each refresh)
+  const [secondsLeft, setSecondsLeft] = React.useState(29);
+  React.useEffect(() => {
+    const interval = setInterval(() => {
+      setSecondsLeft((prev) => (prev > 0 ? prev - 1 : 29));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Defensive: fallback to empty array if data is not an array
+  const coins = Array.isArray(data) ? data : [];
+
+  return (
+    <div className="w-full overflow-hidden whitespace-nowrap select-none relative group" style={{minHeight: '56px'}}>
+      <div className="flex items-center gap-8 animate-marquee px-2 py-2 text-base font-bold text-gray-100/95 tracking-wide">
+        {coins.map((coin, idx) => (
+          <div key={coin.symbol} className="inline-flex items-center gap-2 px-4 py-1 rounded-xl bg-gray-900/30 shadow-lg shadow-[#9C3391]/10 hover:shadow-[#9C3391]/30 hover:drop-shadow-lg transition-all duration-300">
+            <span className="font-mono text-gray-300/90">{coin.symbol}</span>
+            <span className="font-mono text-gray-200/95">{formatCurrency(coin.current_price)}</span>
+            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-xs font-bold ${
+              (Number(coin.price_change_1h) || 0) >= 0
+                ? 'bg-[#FF3F7F]/20 text-[#FF3F7F]' 
+                : 'bg-[#FF3B30]/20 text-[#FF3B30]'
             }`}>
-              {/* Inner glossy effect */}
-              <div className="absolute inset-0 pointer-events-none bg-gradient-to-b from-white/5 via-transparent to-black/20 rounded-2xl"></div>
-              
-              <div className="relative mb-2 text-xs font-bold tracking-wide text-gray-300/90">
-                {coin.symbol}
-              </div>
-              <div className={`relative text-lg font-bold flex items-center gap-1 ${
-                coin.gain >= 0 ? 'text-[#FF3F7F]' : 'text-[#FF3B30]'
-              }`}>
-                <span>{coin.gain >= 0 ? '📈' : '📉'}</span>
-                {coin.gain >= 0 ? '+' : ''}{formatDecimal(coin.gain)}%
-              </div>
-            </div>
-          </a>
+              {(Number(coin.price_change_1h) || 0) >= 0 ? '📈' : '📉'}
+              {(Number(coin.price_change_1h) || 0) >= 0 ? '+' : ''}{formatDecimal(Math.abs(Number(coin.price_change_1h) || 0))}%
+            </span>
+          </div>
         ))}
       </div>
     </div>
-  </div>
-);
+  );
+};
 
 export default function App() {
   const [gainers, setGainers] = useState([]);
@@ -346,21 +333,28 @@ export default function App() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-black via-gray-950 to-black">
+    <div className="min-h-screen bg-gradient-to-br from-black via-gray-950 to-black relative">
+      {/* 1h Change label above TopMoversBar */}
+      <div className="absolute left-8 top-24 z-50">
+        <span className="px-4 py-1 text-xs font-bold tracking-wider uppercase text-pink-400 bg-black/40 rounded-xl border border-pink-400/10 shadow-none" style={{letterSpacing: '0.1em'}}>1h Change</span>
+      </div>
+      {/* Countdown timer in very top right */}
+      <div className="fixed top-4 right-8 z-50 text-xs font-mono font-bold text-gray-400/30 tracking-widest select-none pointer-events-none" style={{letterSpacing: '0.1em'}}>
+        <CountdownTimer />
+      </div>
       {/* Header */}
-      <header className="sticky top-0 z-50 border-b shadow-2xl bg-black/98 backdrop-blur-2xl border-gray-900/80 shadow-black/60">
+      <header className="sticky top-0 z-40 border-b shadow-2xl bg-black/98 backdrop-blur-2xl border-gray-900/80 shadow-black/60">
         <div className="px-6 py-6 mx-auto max-w-7xl">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-3xl font-bold tracking-wide text-white animate-fade-in-up">
-                CBMO4ERS
-                <span className="ml-3 text-[#FF5E00] font-bold animate-text-glow-pulse">
-                  BHABITS CB INSIGHT
-                </span>
-              </h1>
-              <p className="mt-2 text-sm font-medium text-[#E0E0E0] tracking-wide animate-fade-in-up">REAL-TIME CRYPTOCURRENCY MARKET DATA</p>
-            </div>
-            <StatusBadge isConnected={isConnected} lastUpdate={lastUpdate} />
+          <div className="flex flex-col items-center justify-center group">
+            <img 
+              src={logobro} 
+              alt="Logo" 
+              className="h-56 w-auto bg-transparent animate-fade-in-up transition-all duration-300"
+              style={{ filter: "none", transition: "filter 0.3s" }}
+              onMouseOver={e => e.currentTarget.style.filter = "drop-shadow(0 0 40px #ec4899)"}
+              onMouseOut={e => e.currentTarget.style.filter = "none"}
+            />
+            <p className="mt-6 text-xl font-medium text-[#E0E0E0] tracking-wide animate-fade-in-up text-center">REAL-TIME CRYPTOCURRENCY MARKET DATA</p>
           </div>
         </div>
       </header>
@@ -368,8 +362,9 @@ export default function App() {
       {/* Main Content */}
       <main className="px-6 py-10 mx-auto space-y-10 max-w-7xl">
         {/* Top Movers Section */}
-        <section className="animate-fade-in-up">
-          <TopMoversBar data={top24h} />
+        <section className="mt-16 animate-fade-in-up">
+          {/* Pass correct 1h data to TopMoversBar */}
+          <TopMoversBar data={bannerData} />
         </section>
 
         {/* Tables Grid */}
@@ -388,6 +383,7 @@ export default function App() {
 
         {/* Scrolling Banner Section */}
         <section className="animate-fade-in-up">
+          {/* Pass correct 1h volume change data to ContinuousScrollingBanner */}
           <ContinuousScrollingBanner data={bannerData} />
         </section>
 
@@ -401,4 +397,16 @@ export default function App() {
       </main>
     </div>
   );
+}
+
+// CountdownTimer component for global timer
+function CountdownTimer() {
+  const [secondsLeft, setSecondsLeft] = React.useState(29);
+  React.useEffect(() => {
+    const interval = setInterval(() => {
+      setSecondsLeft((prev) => (prev > 0 ? prev - 1 : 29));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+  return <span>{secondsLeft}</span>;
 }
