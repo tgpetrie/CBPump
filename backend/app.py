@@ -20,8 +20,16 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 # Flask App Setup
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'crypto-dashboard-secret')
-socketio = SocketIO(app, cors_allowed_origins="*")
-CORS(app)
+
+# Configure allowed CORS origins from environment
+cors_env = os.environ.get('CORS_ALLOWED_ORIGINS', '*')
+if cors_env == '*':
+    cors_origins = '*'
+else:
+    cors_origins = [origin.strip() for origin in cors_env.split(',') if origin.strip()]
+
+socketio = SocketIO(app, cors_allowed_origins=cors_origins)
+CORS(app, origins=cors_origins)
 
 # Dynamic Configuration with Environment Variables and Defaults
 CONFIG = {
