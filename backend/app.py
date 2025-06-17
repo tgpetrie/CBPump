@@ -438,6 +438,10 @@ def get_coinbase_24h_top_movers():
 # DATA FORMATTING FUNCTIONS
 # =============================================================================
 
+def process_product_data(product, stats_data, ticker_data):
+    # your implementation here
+    pass
+
 def format_crypto_data(crypto_data):
     """Format 3-minute crypto data for frontend with detailed price tracking"""
     return [
@@ -451,41 +455,7 @@ def format_crypto_data(crypto_data):
         for coin in crypto_data
     ]
 
-def format_crypto_data_with_charts(crypto_data):
-    """Format crypto data with chart indicators"""
-    formatted_data = []
-    
-    for coin in crypto_data:
-        symbol = coin["symbol"]
-        current_price = coin["current_price"]
-        
-        # Get mini chart data (last 6 hours)
-        mini_chart = get_historical_chart_data(symbol, 1)  # 1 day, but we'll use last few hours
-        chart_preview = mini_chart[-6:] if len(mini_chart) >= 6 else mini_chart
-        
-        # Simple trend indicator
-        trend_indicator = "neutral"
-        if len(chart_preview) >= 2:
-            price_change = (chart_preview[-1]['price'] - chart_preview[0]['price']) / chart_preview[0]['price'] * 100
-            if price_change > 1:
-                trend_indicator = "bullish"
-            elif price_change < -1:
-                trend_indicator = "bearish"
-        
-        formatted_data.append({
-            "symbol": symbol,
-            "current": current_price,
-            "initial_3min": coin["initial_price_3min"],
-            "gain": coin["price_change_percentage_3min"],
-            "interval_minutes": round(coin["actual_interval_minutes"], 1),
-            "chart_preview": [point['price'] for point in chart_preview],
-            "trend_indicator": trend_indicator,
-            "has_chart_data": len(chart_preview) > 0
-        })
-    
-    return formatted_data
-
-def format_24h_banner_data(banner_data):
+def format_banner_data(banner_data):
     """Format 24h banner data for frontend"""
     return [
         {
@@ -547,7 +517,7 @@ def get_crypto_data():
             "gainers": format_crypto_data(gainers[:15]),
             "losers": format_crypto_data(losers[:15]),
             "top24h": format_crypto_data(top24h),
-            "banner": format_24h_banner_data(banner_24h_movers[:20])
+            "banner": format_banner_data(banner_24h_movers[:20])
         }
         
         # Update cache
@@ -846,7 +816,7 @@ def get_banner_endpoint():
     """24h banner data endpoint"""
     try:
         banner_data = get_24h_top_movers()
-        formatted_banner = format_24h_banner_data(banner_data)
+        formatted_banner = format_banner_data(banner_data)
         return jsonify({
             "banner": formatted_banner,
             "count": len(formatted_banner),
@@ -1160,3 +1130,9 @@ else:
     # Production mode for Vercel
     log_config()
     logging.info("Running in production mode (Vercel)")
+
+__all__ = [
+    "process_product_data",
+    "format_crypto_data",
+    "format_banner_data"
+]

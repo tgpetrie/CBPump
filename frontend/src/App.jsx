@@ -14,6 +14,7 @@ const formatDecimal = (value, decimals = 2) => {
   
   return num.toFixed(decimals);
 };
+
 const formatCurrency = val => new Intl.NumberFormat('en-US', { 
   style: 'currency', 
   currency: 'USD',
@@ -65,6 +66,7 @@ const ContinuousScrollingBanner = ({ data }) => {
                 <a 
                   href={`https://www.coinbase.com/price/${coin.symbol.split('-')[0].toLowerCase()}`} 
                   target="_blank"
+                  rel="noopener noreferrer"
                   className="flex items-center gap-4 transition-all duration-300 hover:scale-105 hover:shadow-lg hover:shadow-[#9C3391]/40 hover:drop-shadow-lg rounded-lg px-3 py-2 hover:bg-gray-900/40 backdrop-blur-xl"
                 >
                   <div className="text-sm font-bold tracking-wide text-gray-300/90">
@@ -91,6 +93,7 @@ const ContinuousScrollingBanner = ({ data }) => {
                 <a 
                   href={`https://www.coinbase.com/price/${coin.symbol.split('-')[0].toLowerCase()}`} 
                   target="_blank"
+                  rel="noopener noreferrer"
                   className="flex items-center gap-4 transition-all duration-300 hover:scale-105 hover:shadow-lg hover:shadow-[#9C3391]/40 hover:drop-shadow-lg rounded-lg px-3 py-2 hover:bg-gray-900/40 backdrop-blur-xl"
                 >
                   <div className="text-sm font-bold tracking-wide text-gray-300/90">
@@ -128,6 +131,7 @@ const CryptoRow = ({ coin, index }) => (
         <a 
           href={`https://www.coinbase.com/price/${coin.symbol.split('-')[0].toLowerCase()}`} 
           target="_blank"
+          rel="noopener noreferrer"
           className="font-bold text-gray-300/90 transition-all duration-300 hover:text-[#00CFFF] hover:shadow-lg hover:shadow-[#9C3391]/30 hover:drop-shadow-lg group-hover:underline tracking-wide"
         >
           {coin.symbol}
@@ -218,6 +222,7 @@ const TopMoversBar = ({ data }) => (
             key={coin.symbol}
             href={`https://www.coinbase.com/price/${coin.symbol.split('-')[0].toLowerCase()}`} 
             target="_blank"
+            rel="noopener noreferrer"
             className="flex-shrink-0 transition-all duration-300 group hover:scale-105 hover:-translate-y-1"
           >
             <div className={`px-5 py-4 rounded-2xl border transition-all duration-300 backdrop-blur-xl shadow-lg relative group-hover:shadow-[#9C3391]/40 hover:drop-shadow-lg ${
