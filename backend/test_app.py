@@ -5,8 +5,8 @@ class TestProcessProductData(unittest.TestCase):
     def test_process_product_data(self):
         # Mock product, stats, and ticker data
         product = {"id": "BTC-USD"}
-        stats_data = {"volume": "24000", "open": "29000"}
-        ticker_data = {"price": "30000"}
+        stats_data = {"volume": "24000", "open": "29000", "high": "31000", "low": "28000"}
+        ticker_data = {"price": "30000", "volume": "24000", "time": "2023-01-01T12:00:00Z"}
         
         # Call the function
         result = process_product_data(product, stats_data, ticker_data)
@@ -21,8 +21,8 @@ class TestFormatCryptoData(unittest.TestCase):
     def test_format_crypto_data(self):
         # Mock crypto data
         crypto_data = [
-            {"symbol": "BTC-USD", "current_price": 30000, "price_change_percentage_3min": 3.45},
-            {"symbol": "ETH-USD", "current_price": 2000, "price_change_percentage_3min": 5.26}
+            {"symbol": "BTC-USD", "current_price": 30000, "price_change_percentage_1h": 3.45},
+            {"symbol": "ETH-USD", "current_price": 2000, "price_change_percentage_1h": 5.26}
         ]
         
         # Call the function
