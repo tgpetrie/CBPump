@@ -17,10 +17,7 @@ cd backend
 pip install -r requirements.txt
 python app.py
 ```
-=======
-# CBPump
 
-This repository contains the backend and frontend code for the CBMo4ers crypto dashboard.
 
 ## Backend Configuration
 
@@ -36,4 +33,3 @@ export CORS_ALLOWED_ORIGINS="https://example.com,https://foo.bar"
 ## Development
 
 See `DOCKER.md` for container details and `docker-compose.yml` for available services.
->>>>>>> 106ef34adbf08cfa1588a012a1ad75e79c7c15c2
