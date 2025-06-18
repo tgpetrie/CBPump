@@ -46,7 +46,7 @@ sys.modules.setdefault("requests", requests)
 from app import (
     calculate_interval_changes,
     format_crypto_data,
-    format_24h_banner_data,
+    format_banner_data,
     price_history,
     CONFIG,
     process_product_data,

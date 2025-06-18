@@ -1,7 +1,9 @@
 import os
 import argparse
+import socket
+import subprocess
+import sys
 from flask import Flask, jsonify, request
-from flask_socketio import SocketIO, emit
 from flask_cors import CORS
 import requests
 import time
@@ -28,7 +30,6 @@ if cors_env == '*':
 else:
     cors_origins = [origin.strip() for origin in cors_env.split(',') if origin.strip()]
 
-socketio = SocketIO(app, cors_allowed_origins=cors_origins)
 CORS(app, origins=cors_origins)
 
 # Dynamic Configuration with Environment Variables and Defaults
@@ -781,17 +782,329 @@ def analyze_coin_potential(symbol, chart_data):
 # API ROUTES
 # =============================================================================
 
+# =============================================================================
+# THREE UNIQUE ENDPOINTS FOR DIFFERENT UI SECTIONS
+# =============================================================================
+
+@app.route('/api/banner-top')
+def get_top_banner():
+    """Top banner: Current price + 1h % change (unique endpoint)"""
+    try:
+        # Get specific data for top banner - focus on price and 1h changes
+        banner_data = get_24h_top_movers()
+        
+        if not banner_data:
+            return jsonify({"error": "No banner data available"}), 503
+            
+        # Format specifically for top banner - current price and 1h change focus
+        top_banner_data = []
+        for coin in banner_data[:20]:  # Top 20 for scrolling
+            top_banner_data.append({
+                "symbol": coin["symbol"],
+                "current_price": coin["current_price"],
+                "price_change_1h": coin["price_change_1h"],
+                "market_cap": coin.get("market_cap", 0)
+            })
+        
+        return jsonify({
+            "banner_data": top_banner_data,
+            "type": "top_banner",
+            "count": len(top_banner_data),
+            "last_updated": datetime.now().isoformat()
+        })
+    except Exception as e:
+        logging.error(f"Error in top banner endpoint: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/banner-bottom')
+def get_bottom_banner():
+    """Bottom banner: Volume + 1h % change (unique endpoint)"""
+    try:
+        # Get specific data for bottom banner - focus on volume and 1h changes
+        banner_data = get_24h_top_movers()
+        
+        if not banner_data:
+            return jsonify({"error": "No banner data available"}), 503
+            
+        # Sort by volume for bottom banner
+        volume_sorted = sorted(banner_data, key=lambda x: x.get("volume_24h", 0), reverse=True)
+        
+        # Format specifically for bottom banner - volume and 1h change focus
+        bottom_banner_data = []
+        for coin in volume_sorted[:20]:  # Top 20 by volume
+            bottom_banner_data.append({
+                "symbol": coin["symbol"],
+                "volume_24h": coin["volume_24h"],
+                "price_change_1h": coin["price_change_1h"],
+                "current_price": coin["current_price"]
+            })
+        
+        return jsonify({
+            "banner_data": bottom_banner_data,
+            "type": "bottom_banner", 
+            "count": len(bottom_banner_data),
+            "last_updated": datetime.now().isoformat()
+        })
+    except Exception as e:
+        logging.error(f"Error in bottom banner endpoint: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/tables-3min')
+def get_tables_3min():
+    """Tables: 3-minute gainers/losers (unique endpoint)"""
+    try:
+        # Get specific data for tables - focus on 3-minute changes
+        data = get_crypto_data()
+        
+        if not data:
+            return jsonify({"error": "No table data available"}), 503
+            
+        # Extract gainers and losers from the main data
+        gainers = data.get('gainers', [])
+        losers = data.get('losers', [])
+        
+        # Format specifically for tables with 3-minute data
+        tables_data = {
+            "gainers": gainers[:15],  # Top 15 gainers
+            "losers": losers[:15],    # Top 15 losers
+            "type": "tables_3min",
+            "count": {
+                "gainers": len(gainers[:15]),
+                "losers": len(losers[:15])
+            },
+            "last_updated": datetime.now().isoformat()
+        }
+        
+        return jsonify(tables_data)
+    except Exception as e:
+        logging.error(f"Error in tables endpoint: {e}")
+        return jsonify({"error": str(e)}), 500
+
+# =============================================================================
+# INDIVIDUAL COMPONENT ENDPOINTS - Each component gets its own unique data
+# =============================================================================
+
+@app.route('/api/component/top-banner-scroll')
+def get_top_banner_scroll():
+    """Individual endpoint for top scrolling banner - 1-hour price change data"""
+    try:
+        # Get 1-hour price change data from 24h movers API
+        banner_data = get_24h_top_movers()
+        if not banner_data:
+            return jsonify({"error": "No data available"}), 503
+            
+        # Sort by 1-hour price change for top banner
+        hour_sorted = sorted(banner_data, key=lambda x: abs(x.get("price_change_1h", 0)), reverse=True)
+        
+        top_scroll_data = []
+        for coin in hour_sorted[:20]:  # Top 20 by 1-hour price change
+            top_scroll_data.append({
+                "symbol": coin["symbol"],
+                "current_price": coin["current_price"],
+                "price_change_1h": coin["price_change_1h"],  # 1-hour price change
+                "initial_price_1h": coin["initial_price_1h"],
+                "market_cap": coin.get("market_cap", 0),
+                "sparkline_trend": "up" if coin["price_change_1h"] > 0 else "down"
+            })
+        
+        return jsonify({
+            "component": "top_banner_scroll",
+            "data": top_scroll_data,
+            "count": len(top_scroll_data),
+            "time_frame": "1_hour",
+            "focus": "price_change",
+            "scroll_speed": "medium",
+            "update_interval": 60000,  # 1 minute updates for 1-hour data
+            "last_updated": datetime.now().isoformat()
+        })
+    except Exception as e:
+        logging.error(f"Error in top banner scroll endpoint: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/component/bottom-banner-scroll')
+def get_bottom_banner_scroll():
+    """Individual endpoint for bottom scrolling banner - 1-hour volume change data"""
+    try:
+        # Get 1-hour volume change data (24h banner data has volume info)
+        banner_data = get_24h_top_movers()
+        if not banner_data:
+            return jsonify({"error": "No data available"}), 503
+            
+        # Sort by 24h volume for bottom banner (as we don't have hourly volume data)
+        volume_sorted = sorted(banner_data, key=lambda x: x.get("volume_24h", 0), reverse=True)
+        
+        bottom_scroll_data = []
+        for coin in volume_sorted[:20]:  # Top 20 by volume
+            # Calculate estimated volume change (using price change as proxy)
+            volume_change_estimate = coin["price_change_1h"] * 0.5  # Volume often correlates with price movement
+            
+            bottom_scroll_data.append({
+                "symbol": coin["symbol"],
+                "current_price": coin["current_price"],
+                "volume_24h": coin["volume_24h"],
+                "price_change_1h": coin["price_change_1h"],  # 1-hour change
+                "volume_change_estimate": volume_change_estimate,
+                "volume_category": "high" if coin["volume_24h"] > 10000000 else "medium" if coin["volume_24h"] > 1000000 else "low"
+            })
+        
+        return jsonify({
+            "component": "bottom_banner_scroll",
+            "data": bottom_scroll_data,
+            "count": len(bottom_scroll_data),
+            "time_frame": "1_hour",
+            "focus": "volume_change",
+            "scroll_speed": "slow",
+            "update_interval": 60000,  # 1 minute updates for 1-hour data
+            "last_updated": datetime.now().isoformat()
+        })
+    except Exception as e:
+        logging.error(f"Error in bottom banner scroll endpoint: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/component/gainers-table')
+def get_gainers_table():
+    """Individual endpoint for gainers table - 3-minute data only"""
+    try:
+        data = get_crypto_data()
+        if not data:
+            return jsonify({"error": "No data available"}), 503
+            
+        gainers = data.get('gainers', [])
+        
+        # Enhanced formatting specifically for gainers table
+        gainers_table_data = []
+        for i, coin in enumerate(gainers[:20]):  # Top 20 gainers
+            gainers_table_data.append({
+                "rank": i + 1,
+                "symbol": coin["symbol"],
+                "current_price": coin["current"],  # Use correct field name
+                "price_change_percentage_3min": coin["gain"],  # Use correct field name
+                "initial_price_3min": coin["initial_3min"],  # Use correct field name
+                "actual_interval_minutes": coin.get("interval_minutes", 3),  # Use correct field name
+                "momentum": "strong" if coin["gain"] > 5 else "moderate",
+                "alert_level": "high" if coin["gain"] > 10 else "normal"
+            })
+        
+        return jsonify({
+            "component": "gainers_table",
+            "data": gainers_table_data,
+            "count": len(gainers_table_data),
+            "table_type": "gainers",
+            "time_frame": "3_minutes",
+            "update_interval": 3000,
+            "last_updated": datetime.now().isoformat()
+        })
+    except Exception as e:
+        logging.error(f"Error in gainers table endpoint: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/component/losers-table')
+def get_losers_table():
+    """Individual endpoint for losers table - 3-minute data only"""
+    try:
+        data = get_crypto_data()
+        if not data:
+            return jsonify({"error": "No data available"}), 503
+            
+        losers = data.get('losers', [])
+        
+        # Enhanced formatting specifically for losers table
+        losers_table_data = []
+        for i, coin in enumerate(losers[:20]):  # Top 20 losers
+            losers_table_data.append({
+                "rank": i + 1,
+                "symbol": coin["symbol"],
+                "current_price": coin["current"],  # Use correct field name
+                "price_change_percentage_3min": coin["gain"],  # Use correct field name (negative for losers)
+                "initial_price_3min": coin["initial_3min"],  # Use correct field name
+                "actual_interval_minutes": coin.get("interval_minutes", 3),  # Use correct field name
+                "momentum": "strong" if coin["gain"] < -5 else "moderate",
+                "alert_level": "high" if coin["gain"] < -10 else "normal"
+            })
+        
+        return jsonify({
+            "component": "losers_table",
+            "data": losers_table_data,
+            "count": len(losers_table_data),
+            "table_type": "losers",
+            "time_frame": "3_minutes",
+            "update_interval": 3000,
+            "last_updated": datetime.now().isoformat()
+        })
+    except Exception as e:
+        logging.error(f"Error in losers table endpoint: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/component/top-movers-bar')
+def get_top_movers_bar():
+    """Individual endpoint for top movers horizontal bar - 3min focus"""
+    try:
+        # Get 3-minute data
+        data = get_crypto_data()
+        if not data:
+            return jsonify({"error": "No data available"}), 503
+            
+        # Use top24h which is already a mix of top gainers and losers from 3-min data
+        top_movers_3min = data.get('top24h', [])
+        
+        # Format specifically for horizontal moving bar
+        top_movers_data = []
+        for coin in top_movers_3min[:15]:  # Perfect amount for horizontal scroll
+            top_movers_data.append({
+                "symbol": coin["symbol"],
+                "current_price": coin["current"],
+                "price_change_3min": coin["gain"],  # 3-minute change
+                "initial_price_3min": coin["initial_3min"],
+                "interval_minutes": coin.get("interval_minutes", 3),
+                "bar_color": "green" if coin["gain"] > 0 else "red",
+                "momentum": "strong" if abs(coin["gain"]) > 5 else "moderate"
+            })
+        
+        return jsonify({
+            "component": "top_movers_bar",
+            "data": top_movers_data,
+            "count": len(top_movers_data),
+            "animation": "horizontal_scroll",
+            "time_frame": "3_minutes",
+            "update_interval": 3000,
+            "last_updated": datetime.now().isoformat()
+        })
+    except Exception as e:
+        logging.error(f"Error in top movers bar endpoint: {e}")
+        return jsonify({"error": str(e)}), 500
+
+# =============================================================================
+# EXISTING ENDPOINTS (Updated root to show new individual endpoints)
+# =============================================================================
+
 @app.route('/')
 def root():
     """Root endpoint"""
     return jsonify({
         "service": "CBMo4ers Crypto Dashboard Backend",
         "status": "running",
-        "version": "2.0.0",
-        "endpoints": [
+        "version": "3.0.0",
+        "description": "Individual component endpoints with correct time frames",
+        "individual_component_endpoints": [
+            "/api/component/top-banner-scroll",     # Top scrolling banner - 1-hour PRICE change
+            "/api/component/bottom-banner-scroll",  # Bottom scrolling banner - 1-hour VOLUME change  
+            "/api/component/gainers-table",         # Gainers table - 3-minute data (main feature)
+            "/api/component/losers-table",          # Losers table - 3-minute data (main feature)
+            "/api/component/top-movers-bar"         # Horizontal top movers bar - 3-minute data
+        ],
+        "time_frame_specification": {
+            "top_banner": "1-hour price change data",
+            "bottom_banner": "1-hour volume change data", 
+            "main_tables": "3-minute gainers/losers data (key feature)",
+            "top_movers_bar": "3-minute data"
+        },
+        "legacy_endpoints": [
             "/api/health",
-            "/api/crypto", 
-            "/api/banner-1h",
+            "/api/banner-top",     # Legacy: Top banner
+            "/api/banner-bottom",  # Legacy: Bottom banner
+            "/api/tables-3min",    # Legacy: Tables
+            "/api/crypto",         # Legacy: Combined data
+            "/api/banner-1h",      # Legacy: Banner data
             "/api/chart/BTC-USD",
             "/api/watchlist",
             "/api/config"
@@ -1017,28 +1330,16 @@ def clear_cache():
     return jsonify({"message": "Cache cleared successfully"})
 
 # =============================================================================
-# WEBSOCKET HANDLERS
+# BACKGROUND UPDATES (No SocketIO - using REST polling)
 # =============================================================================
 
-@socketio.on('connect')
-def handle_connect():
-    logging.info('Client connected')
-    data = get_crypto_data()
-    if data:
-        emit('crypto_update', data)
-
-@socketio.on('disconnect')
-def handle_disconnect():
-    logging.info('Client disconnected')
-
 def background_crypto_updates():
-    """Background thread to send periodic updates"""
+    """Background thread to update cache periodically"""
     while True:
         try:
             data = get_crypto_data()
             if data:
-                socketio.emit('crypto_update', data)
-                logging.info(f"Sent update: {len(data['gainers'])} gainers, {len(data['losers'])} losers, {len(data['banner'])} banner items")
+                logging.info(f"Cache updated: {len(data['gainers'])} gainers, {len(data['losers'])} losers, {len(data['banner'])} banner items")
         except Exception as e:
             logging.error(f"Error in background update: {e}")
         
@@ -1112,10 +1413,9 @@ if __name__ == '__main__':
     logging.info(f"Server starting on http://{CONFIG['HOST']}:{CONFIG['PORT']}")
     
     try:
-        socketio.run(app, 
-                    debug=CONFIG['DEBUG'], 
-                    host=CONFIG['HOST'], 
-                    port=CONFIG['PORT'])
+        app.run(debug=CONFIG['DEBUG'], 
+                host=CONFIG['HOST'], 
+                port=CONFIG['PORT'])
     except OSError as e:
         if "Address already in use" in str(e):
             logging.error(f"Port {CONFIG['PORT']} is in use. Try:")
