@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import '../index.css';
 import logobro from './logobro.png';
+import { fetchMarketData } from './api';
 
 const formatDecimal = (value, decimals = 2) => {
   // Add proper null/undefined checking
@@ -44,7 +45,86 @@ const StatusBadge = ({ isConnected, lastUpdate }) => (
   </div>
 );
 
-const ContinuousScrollingBanner = ({ data }) => {
+// Price Banner Component
+const PriceBanner = ({ data }) => {
+  return (
+    <div className="overflow-hidden bg-gradient-to-r from-black/80 via-black/60 to-black/80 rounded-3xl shadow-none border-none backdrop-blur-3xl animate-fade-in-up">
+      {/* Glossy overlay effect */}
+      <div className="absolute inset-0 pointer-events-none bg-gradient-to-b from-white/5 via-transparent to-black/20 rounded-3xl"></div>
+      <div className="relative px-6 py-4">
+        <div className="flex items-center gap-3">
+          <span className="text-xl">📈</span>
+          <h3 className="text-base font-bold tracking-wide uppercase text-gray-200/90">
+            1H Price Change • Live Market Feed
+          </h3>
+        </div>
+      </div>
+      <div className="relative h-16 overflow-hidden">
+        <div className="absolute inset-0 flex items-center">
+          <div className="flex animate-scroll whitespace-nowrap">
+            {/* First set of data */}
+            {data.map((coin, index) => (
+              <div key={`first-${coin.symbol}`} className="flex-shrink-0 mx-8">
+                <a 
+                  href={`https://www.coinbase.com/price/${coin.symbol.split('-')[0].toLowerCase()}`} 
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-4 transition-all duration-300 hover:scale-105 hover:drop-shadow-lg rounded-lg px-3 py-2 hover:bg-gray-900/40 backdrop-blur-xl"
+                >
+                  <div className="text-sm font-bold tracking-wide text-gray-300/90">
+                    {coin.symbol}
+                  </div>
+                  <div className="font-mono text-sm text-gray-100/95">
+                    {formatCurrency(coin.current_price)}
+                  </div>
+                  <div className={`flex items-center gap-1 text-sm font-bold ${
+                    (coin.price_change_1h || 0) >= 0 ? 'text-[#00FF88]' : 'text-[#FF4444]'
+                  }`}>
+                    <span>{(coin.price_change_1h || 0) >= 0 ? '🚀' : '📉'}</span>
+                    1h: {(coin.price_change_1h || 0) >= 0 ? '+' : ''}{formatDecimal(Math.abs(coin.price_change_1h || 0))}%
+                  </div>
+                  <div className="text-xs text-gray-400">
+                    24h: {(coin.price_change_24h || 0) >= 0 ? '+' : ''}{formatDecimal(Math.abs(coin.price_change_24h || 0))}%
+                  </div>
+                </a>
+              </div>
+            ))}
+            {/* Duplicate set for seamless scrolling */}
+            {data.map((coin, index) => (
+              <div key={`second-${coin.symbol}`} className="flex-shrink-0 mx-8">
+                <a 
+                  href={`https://www.coinbase.com/price/${coin.symbol.split('-')[0].toLowerCase()}`} 
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-4 transition-all duration-300 hover:scale-105 hover:drop-shadow-lg rounded-lg px-3 py-2 hover:bg-gray-900/40 backdrop-blur-xl"
+                >
+                  <div className="text-sm font-bold tracking-wide text-gray-300/90">
+                    {coin.symbol}
+                  </div>
+                  <div className="font-mono text-sm text-gray-100/95">
+                    {formatCurrency(coin.current_price)}
+                  </div>
+                  <div className={`flex items-center gap-1 text-sm font-bold ${
+                    (coin.price_change_1h || 0) >= 0 ? 'text-[#00FF88]' : 'text-[#FF4444]'
+                  }`}>
+                    <span>{(coin.price_change_1h || 0) >= 0 ? '🚀' : '📉'}</span>
+                    1h: {(coin.price_change_1h || 0) >= 0 ? '+' : ''}{formatDecimal(Math.abs(coin.price_change_1h || 0))}%
+                  </div>
+                  <div className="text-xs text-gray-400">
+                    24h: {(coin.price_change_24h || 0) >= 0 ? '+' : ''}{formatDecimal(Math.abs(coin.price_change_24h || 0))}%
+                  </div>
+                </a>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Volume Banner Component
+const VolumeBanner = ({ data }) => {
   return (
     <div className="overflow-hidden bg-gradient-to-r from-black/80 via-black/60 to-black/80 rounded-3xl shadow-none border-none backdrop-blur-3xl animate-fade-in-up">
       {/* Glossy overlay effect */}
@@ -76,10 +156,10 @@ const ContinuousScrollingBanner = ({ data }) => {
                     {formatCurrency(coin.current_price)}
                   </div>
                   <div className={`flex items-center gap-1 text-sm font-bold ${
-                    (coin.volume_change_1h || 0) >= 0 ? 'text-[#00CFFF]' : 'text-[#FF5E00]'
+                    (coin.price_change_1h || 0) >= 0 ? 'text-[#00CFFF]' : 'text-[#FF5E00]'
                   }`}>
-                    <span>{(coin.volume_change_1h || 0) >= 0 ? '🚀' : '📉'}</span>
-                    1h: {(coin.volume_change_1h || 0) >= 0 ? '+' : ''}{formatDecimal(Math.abs(coin.volume_change_1h || 0))}%
+                    <span>{(coin.price_change_1h || 0) >= 0 ? '🚀' : '📉'}</span>
+                    1h: {(coin.price_change_1h || 0) >= 0 ? '+' : ''}{formatDecimal(Math.abs(coin.price_change_1h || 0))}%
                   </div>
                   <div className="text-xs text-gray-400">
                     Vol: {formatCurrency(coin.volume_24h || 0)}
@@ -103,10 +183,10 @@ const ContinuousScrollingBanner = ({ data }) => {
                     {formatCurrency(coin.current_price)}
                   </div>
                   <div className={`flex items-center gap-1 text-sm font-bold ${
-                    (coin.volume_change_1h || 0) >= 0 ? 'text-[#00CFFF]' : 'text-[#FF5E00]'
+                    (coin.price_change_1h || 0) >= 0 ? 'text-[#00CFFF]' : 'text-[#FF5E00]'
                   }`}>
-                    <span>{(coin.volume_change_1h || 0) >= 0 ? '🚀' : '📉'}</span>
-                    1h: {(coin.volume_change_1h || 0) >= 0 ? '+' : ''}{formatDecimal(Math.abs(coin.volume_change_1h || 0))}%
+                    <span>{(coin.price_change_1h || 0) >= 0 ? '🚀' : '📉'}</span>
+                    1h: {(coin.price_change_1h || 0) >= 0 ? '+' : ''}{formatDecimal(Math.abs(coin.price_change_1h || 0))}%
                   </div>
                   <div className="text-xs text-gray-400">
                     Vol: {formatCurrency(coin.volume_24h || 0)}
@@ -202,41 +282,6 @@ const CryptoTable = ({ title, data, variant = "default" }) => (
   </div>
 );
 
-const TopMoversBar = ({ data }) => {
-  // Countdown timer state (30 seconds, resets on each refresh)
-  const [secondsLeft, setSecondsLeft] = React.useState(29);
-  React.useEffect(() => {
-    const interval = setInterval(() => {
-      setSecondsLeft((prev) => (prev > 0 ? prev - 1 : 29));
-    }, 1000);
-    return () => clearInterval(interval);
-  }, []);
-
-  // Defensive: fallback to empty array if data is not an array
-  const coins = Array.isArray(data) ? data : [];
-
-  return (
-    <div className="w-full overflow-hidden whitespace-nowrap select-none relative group" style={{minHeight: '56px'}}>
-      <div className="flex items-center gap-8 animate-marquee px-2 py-2 text-base font-bold text-gray-100/95 tracking-wide">
-        {coins.map((coin, idx) => (
-          <div key={coin.symbol} className="inline-flex items-center gap-2 px-4 py-1 rounded-xl bg-gray-900/30 shadow-lg shadow-[#9C3391]/10 hover:shadow-[#9C3391]/30 hover:drop-shadow-lg transition-all duration-300">
-            <span className="font-mono text-gray-300/90">{coin.symbol}</span>
-            <span className="font-mono text-gray-200/95">{formatCurrency(coin.current_price)}</span>
-            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-xs font-bold ${
-              (Number(coin.price_change_1h) || 0) >= 0
-                ? 'bg-[#FF3F7F]/20 text-[#FF3F7F]' 
-                : 'bg-[#FF3B30]/20 text-[#FF3B30]'
-            }`}>
-              {(Number(coin.price_change_1h) || 0) >= 0 ? '📈' : '📉'}
-              {(Number(coin.price_change_1h) || 0) >= 0 ? '+' : ''}{formatDecimal(Math.abs(Number(coin.price_change_1h) || 0))}%
-            </span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-};
-
 export default function App() {
   const [gainers, setGainers] = useState([]);
   const [losers, setLosers] = useState([]);
@@ -246,94 +291,29 @@ export default function App() {
   const [lastUpdate, setLastUpdate] = useState(new Date());
 
   useEffect(() => {
-    console.log('🚀 CBMo4ers App useEffect started!');
-    console.log('🚀 Environment object:', import.meta.env);
-    console.log('🚀 VITE_API_URL value:', import.meta.env.VITE_API_URL);
-    
-    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5001';
-    console.log('🚀 Final apiUrl:', apiUrl);
-    
     const fetchCryptoData = async () => {
-      console.log('🔄 fetchCryptoData function called at:', new Date().toISOString());
-      console.log('🔄 Fetching from URL:', `${apiUrl}/api/crypto`);
-      
       try {
-        // Test health endpoint first
-        console.log('🔄 Testing health endpoint...');
-        const healthResponse = await fetch(`${apiUrl}/api/health`);
-        console.log('📊 Health response status:', healthResponse.status);
-        console.log('📊 Health response ok:', healthResponse.ok);
-        
-        if (healthResponse.ok) {
-          const healthData = await healthResponse.json();
-          console.log('✅ Health data:', healthData);
-        }
-        
-        // Fetch main crypto data
-        console.log('🔄 Fetching crypto data...');
-        const cryptoResponse = await fetch(`${apiUrl}/api/crypto`);
-        console.log('📊 Crypto response status:', cryptoResponse.status);
-        console.log('📊 Crypto response ok:', cryptoResponse.ok);
-        
-        if (!cryptoResponse.ok) {
-          throw new Error(`Crypto API returned status ${cryptoResponse.status}`);
-        }
-        
-        const cryptoData = await cryptoResponse.json();
-        console.log('✅ Crypto data structure:', Object.keys(cryptoData));
-        console.log('✅ Gainers count:', cryptoData.gainers?.length || 0);
-        console.log('✅ Losers count:', cryptoData.losers?.length || 0);
-        console.log('✅ Top24h count:', cryptoData.top24h?.length || 0);
-        
-        // Fetch banner data
-        console.log('🔄 Fetching banner data...');
-        const bannerResponse = await fetch(`${apiUrl}/api/banner-1h`);
-        console.log('📊 Banner response status:', bannerResponse.status);
-        
-        if (!bannerResponse.ok) {
-          throw new Error(`Banner API returned status ${bannerResponse.status}`);
-        }
-        
-        const bannerDataResp = await bannerResponse.json();
-        console.log('✅ Banner data structure:', Object.keys(bannerDataResp));
-        console.log('✅ Banner array length:', bannerDataResp.banner?.length || 0);
-        
-        // Update state
-        console.log('🔄 Updating React state...');
-        setGainers(cryptoData.gainers || []);
-        setLosers(cryptoData.losers || []);
-        setTop24h(cryptoData.top24h || []);
-        setBannerData(bannerDataResp.banner || []);
+        const marketData = await fetchMarketData();
+        console.log('Market Data:', marketData);
+        setGainers(marketData.gainers || []);
+        setLosers(marketData.losers || []);
+        setTop24h(marketData.top24h || []);
+        setBannerData(marketData.banner || []);
         setLastUpdate(new Date());
         setIsConnected(true);
-        
-        console.log('🎉 All data loaded and state updated successfully!');
-        
       } catch (error) {
-        console.error('❌ Error in fetchCryptoData:', error.message);
-        console.error('❌ Full error object:', error);
-        console.error('❌ Error stack:', error.stack);
+        console.error('Error fetching market data:', error);
         setIsConnected(false);
       }
     };
 
-    console.log('🔄 About to call fetchCryptoData for the first time...');
     fetchCryptoData();
-    
-    console.log('🔄 Setting up interval for polling...');
-    const interval = setInterval(() => {
-      console.log('🔄 Interval triggered, calling fetchCryptoData...');
-      fetchCryptoData();
-    }, 5000); // 5 seconds
-    
-    return () => {
-      console.log('🔄 Cleaning up interval...');
-      clearInterval(interval);
-    };
+    const interval = setInterval(fetchCryptoData, 5000);
+    return () => clearInterval(interval);
   }, []);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-black via-gray-950 to-black relative">
+    <div className="min-h-screen bg-black text-white font-sans">
       {/* 1h Change label above TopMoversBar */}
       <div className="absolute left-8 top-24 z-50">
         <span className="px-4 py-1 text-xs font-bold tracking-wider uppercase text-pink-400 bg-black/40 rounded-xl border border-pink-400/10 shadow-none" style={{letterSpacing: '0.1em'}}>1h Change</span>
@@ -361,10 +341,9 @@ export default function App() {
 
       {/* Main Content */}
       <main className="px-6 py-10 mx-auto space-y-10 max-w-7xl">
-        {/* Top Movers Section */}
+        {/* Price Banner Section - Top */}
         <section className="mt-16 animate-fade-in-up">
-          {/* Pass correct 1h data to TopMoversBar */}
-          <TopMoversBar data={bannerData} />
+          <PriceBanner data={bannerData} />
         </section>
 
         {/* Tables Grid */}
@@ -380,17 +359,14 @@ export default function App() {
             variant="losers"
           />
         </section>
-
-        {/* Scrolling Banner Section */}
-        <section className="animate-fade-in-up">
-          {/* Pass correct 1h volume change data to ContinuousScrollingBanner */}
-          <ContinuousScrollingBanner data={bannerData} />
+        {/* Volume Banner Section - bottom */}
+        <section className="mt-16 animate-fade-in-up">
+          <VolumeBanner data={bannerData} />
         </section>
 
         <footer className="py-12 mt-20 text-center border-t border-gray-800/50 backdrop-blur-xl">
           <div className="max-w-4xl mx-auto">
             <p className="text-sm font-medium tracking-wider uppercase text-gray-400/90">
-              Copyright 2025 GUISAN DESIGN - TOM PETRIE - BHABIT
             </p>
           </div>
         </footer>

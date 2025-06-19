@@ -1,0 +1,93 @@
+version: '3.8'
+
+services:
+  # Backend API Service
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: production
+    ports:
+      - "5001:5001"
+    environment:
+      - PORT=5001
+      - HOST=0.0.0.0
+      - DEBUG=false
+      - CORS_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:5173
+      - CACHE_TTL=60
+      - UPDATE_INTERVAL=60
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./backend:/app
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:5001/api/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - cbmo4ers-network
+
+  # Development Backend (alternative)
+  backend-dev:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: development
+    ports:
+      - "5002:5001"
+    environment:
+      - PORT=5001
+      - HOST=0.0.0.0
+      - DEBUG=true
+      - CORS_ALLOWED_ORIGINS=*
+      - CACHE_TTL=30
+      - UPDATE_INTERVAL=30
+      - LOG_LEVEL=DEBUG
+    volumes:
+      - ./backend:/app
+    restart: unless-stopped
+    profiles:
+      - dev
+    networks:
+      - cbmo4ers-network
+
+  # Frontend Service (for production build)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_URL=http://localhost:5001
+      - NODE_ENV=production
+    depends_on:
+      - backend
+    restart: unless-stopped
+    profiles:
+      - prod
+    networks:
+      - cbmo4ers-network
+
+  # Redis for rate limiting and caching (optional)
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    profiles:
+      - prod
+    networks:
+      - cbmo4ers-network
+
+networks:
+  cbmo4ers-network:
+    driver: bridge
+
+volumes:
+  redis_data:
