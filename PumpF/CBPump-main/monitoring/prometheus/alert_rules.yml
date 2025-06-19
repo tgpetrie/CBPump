@@ -1,0 +1,79 @@
+# CBMo4ers Crypto Dashboard - Alert Rules
+groups:
+  - name: cbmo4ers_alerts
+    rules:
+      # API Health Alerts
+      - alert: BackendDown
+        expr: up{job="cbmo4ers-backend"} == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "CBMo4ers Backend is down"
+          description: "The CBMo4ers backend API has been down for more than 30 seconds."
+
+      - alert: HighErrorRate
+        expr: (rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m])) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High error rate detected"
+          description: "Error rate is above 10% for the last 5 minutes."
+
+      - alert: CircuitBreakerOpen
+        expr: cbmo4ers_circuit_breaker_open == 1
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Circuit breaker is open"
+          description: "The circuit breaker has been open for more than 1 minute."
+
+      # Performance Alerts
+      - alert: HighResponseTime
+        expr: avg(http_request_duration_seconds) > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High response time"
+          description: "Average response time is above 2 seconds for the last 5 minutes."
+
+      # External API Alerts
+      - alert: ExternalAPIDown
+        expr: cbmo4ers_external_api_status{api=~"coinbase|coingecko"} == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "External API is down"
+          description: "{{ $labels.api }} API has been down for more than 2 minutes."
+
+      # System Resource Alerts
+      - alert: HighCPUUsage
+        expr: 100 - (avg by(instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage"
+          description: "CPU usage is above 80% for the last 5 minutes."
+
+      - alert: HighMemoryUsage
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage"
+          description: "Memory usage is above 85% for the last 5 minutes."
+
+      - alert: DiskSpaceLow
+        expr: (1 - (node_filesystem_avail_bytes / node_filesystem_size_bytes)) * 100 > 90
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Disk space low"
+          description: "Disk space usage is above 90% for the last 10 minutes."
