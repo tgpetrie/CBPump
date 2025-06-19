@@ -4,7 +4,7 @@ CONFIG = {
     'CACHE_TTL': int(os.environ.get('CACHE_TTL', 60)),
     'INTERVAL_MINUTES': int(os.environ.get('INTERVAL_MINUTES', 3)),
     'MAX_PRICE_HISTORY': int(os.environ.get('MAX_PRICE_HISTORY', 20)),
-    'PORT': int(os.environ.get('PORT', 5001)),
+    'PORT': int(os.environ.get('PORT', 5001)),  # Fixed stable port for development
     'HOST': os.environ.get('HOST', '0.0.0.0'),
     'DEBUG': os.environ.get('DEBUG', 'False').lower() == 'true',
     'UPDATE_INTERVAL': int(os.environ.get('UPDATE_INTERVAL', 60)),

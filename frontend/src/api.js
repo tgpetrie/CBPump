@@ -9,7 +9,7 @@ const getApiBaseUrl = () => {
     return window.location.origin;
   }
   // In development, use the environment variable or default to localhost
-  return import.meta.env.VITE_API_URL || 'http://localhost:5001';
+  return import.meta.env.VITE_API_URL || 'http://localhost:5003';
 };
 
 const API_BASE_URL = getApiBaseUrl();

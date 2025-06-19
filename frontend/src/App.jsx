@@ -64,12 +64,12 @@ const PriceBanner = ({ data }) => {
           <div className="flex animate-scroll whitespace-nowrap">
             {/* First set of data */}
             {data.map((coin, index) => (
-              <div key={`first-${coin.symbol}-${index}`} className="flex-shrink-0 mx-8">
+              <div key={`first-${coin.symbol}`} className="flex-shrink-0 mx-8">
                 <a 
                   href={`https://www.coinbase.com/price/${coin.symbol.split('-')[0].toLowerCase()}`} 
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center gap-4 transition-all duration-300 hover:scale-105 hover:drop-shadow-lg rounded-lg px-3 py-2 hover:bg-gray-900/40 backdrop-blur-xl"
+                  className="flex items
                 >
                   <div className="text-sm font-bold tracking-wide text-gray-300/90">
                     {coin.symbol}
@@ -82,13 +82,16 @@ const PriceBanner = ({ data }) => {
                   }`}>
                     <span>{(coin.price_change_1h || 0) >= 0 ? '🚀' : '📉'}</span>
                     1h: {(coin.price_change_1h || 0) >= 0 ? '+' : ''}{formatDecimal(Math.abs(coin.price_change_1h || 0))}%
+                  </div>
+                  <div className="text-xs text-gray-400">
+                    24h: {(coin.price_change_24h || 0) >= 0 ? '+' : ''}{formatDecimal(Math.abs(coin.price_change_24h || 0))}%
                   </div>
                 </a>
               </div>
             ))}
             {/* Duplicate set for seamless scrolling */}
             {data.map((coin, index) => (
-              <div key={`second-${coin.symbol}-${index}`} className="flex-shrink-0 mx-8">
+              <div key={`second-${coin.symbol}`} className="flex-shrink-0 mx-8">
                 <a 
                   href={`https://www.coinbase.com/price/${coin.symbol.split('-')[0].toLowerCase()}`} 
                   target="_blank"
@@ -106,6 +109,9 @@ const PriceBanner = ({ data }) => {
                   }`}>
                     <span>{(coin.price_change_1h || 0) >= 0 ? '🚀' : '📉'}</span>
                     1h: {(coin.price_change_1h || 0) >= 0 ? '+' : ''}{formatDecimal(Math.abs(coin.price_change_1h || 0))}%
+                  </div>
+                  <div className="text-xs text-gray-400">
+                    24h: {(coin.price_change_24h || 0) >= 0 ? '+' : ''}{formatDecimal(Math.abs(coin.price_change_24h || 0))}%
                   </div>
                 </a>
               </div>
@@ -136,7 +142,7 @@ const VolumeBanner = ({ data }) => {
           <div className="flex animate-scroll whitespace-nowrap">
             {/* First set of data */}
             {data.map((coin, index) => (
-              <div key={`first-${coin.symbol}-${index}`} className="flex-shrink-0 mx-8">
+              <div key={`first-${coin.symbol}`} className="flex-shrink-0 mx-8">
                 <a 
                   href={`https://www.coinbase.com/price/${coin.symbol.split('-')[0].toLowerCase()}`} 
                   target="_blank"
@@ -163,7 +169,7 @@ const VolumeBanner = ({ data }) => {
             ))}
             {/* Duplicate set for seamless scrolling */}
             {data.map((coin, index) => (
-              <div key={`second-${coin.symbol}-${index}`} className="flex-shrink-0 mx-8">
+              <div key={`second-${coin.symbol}`} className="flex-shrink-0 mx-8">
                 <a 
                   href={`https://www.coinbase.com/price/${coin.symbol.split('-')[0].toLowerCase()}`} 
                   target="_blank"
@@ -268,13 +274,50 @@ const CryptoTable = ({ title, data, variant = "default" }) => (
         </thead>
         <tbody className="divide-y divide-gray-800/30">
           {data.map((coin, index) => 
-            <CryptoRow key={`${coin.symbol}-${index}`} coin={coin} index={index} />
+            <CryptoRow key={coin.symbol} coin={coin} index={index} />
           )}
         </tbody>
       </table>
     </div>
   </div>
 );
+
+const TopMoversBar = ({ data }) => {
+  // Countdown timer state (30 seconds, resets on each refresh)
+  const [secondsLeft, setSecondsLeft] = React.useState(29);
+  React.useEffect(() => {
+    const interval = setInterval(() => {
+      setSecondsLeft((prev) => (prev > 0 ? prev - 1 : 29));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Sort coins by absolute 1h price change to show top hourly movers
+  const coins = Array.isArray(data)
+    ? [...data].sort((a, b) => Math.abs(b.price_change_1h || 0) - Math.abs(a.price_change_1h || 0))
+    : [];
+
+  return (
+    <div className="w-full overflow-hidden whitespace-nowrap select-none relative group" style={{minHeight: '56px'}}>
+      <div className="flex items-center gap-8 animate-marquee px-2 py-2 text-base font-bold text-gray-100/95 tracking-wide">
+        {coins.map((coin, idx) => (
+          <div key={coin.symbol} className="inline-flex items-center gap-2 px-4 py-1 rounded-xl bg-gray-900/30 shadow-lg shadow-[#9C3391]/10 hover:shadow-[#9C3391]/30 hover:drop-shadow-lg transition-all duration-300">
+            <span className="font-mono text-gray-300/90">{coin.symbol}</span>
+            <span className="font-mono text-gray-200/95">{formatCurrency(coin.current_price)}</span>
+            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-xs font-bold ${
+              (Number(coin.price_change_1h) || 0) >= 0
+                ? 'bg-[#FF3F7F]/20 text-[#FF3F7F]' 
+                : 'bg-[#FF3B30]/20 text-[#FF3B30]'
+            }`}>
+              {(Number(coin.price_change_1h) || 0) >= 0 ? '📈' : '📉'}
+              {(Number(coin.price_change_1h) || 0) >= 0 ? '+' : ''}{formatDecimal(Math.abs(Number(coin.price_change_1h) || 0))}%
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
 
 export default function App() {
   const [gainers, setGainers] = useState([]);
@@ -329,7 +372,7 @@ export default function App() {
               onMouseOut={e => e.currentTarget.style.filter = "none"}
             />
             <p className="mt-6 text-xl font-medium text-[#E0E0E0] tracking-wide animate-fade-in-up text-center">REAL-TIME CRYPTOCURRENCY MARKET DATA</p>
-          </div>
+          </div }
         </div>
       </header>
 
@@ -338,6 +381,12 @@ export default function App() {
         {/* Price Banner Section - Top */}
         <section className="mt-16 animate-fade-in-up">
           <PriceBanner data={bannerData} />
+        </section>
+
+        {/* Top Movers Section */}
+        <section className="animate-fade-in-up">
+          {/* Pass correct 1h data to TopMoversBar */}
+          <TopMoversBar data={bannerData} />
         </section>
 
         {/* Tables Grid */}
@@ -353,16 +402,16 @@ export default function App() {
             variant="losers"
           />
         </section>
-        {/* Volume Banner Section - bottom */}
-        <section className="mt-16 animate-fade-in-up">
+
+        {/* Volume Banner Section - Bottom */}
+        <section className="animate-fade-in-up">
           <VolumeBanner data={bannerData} />
         </section>
 
         <footer className="py-12 mt-20 text-center border-t border-gray-800/50 backdrop-blur-xl">
           <div className="max-w-4xl mx-auto">
             <p className="text-sm font-medium tracking-wider uppercase text-gray-400/90">
-            </p>
-          </div>
+              Copyright 2025
         </footer>
       </main>
     </div>
