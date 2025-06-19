@@ -1,0 +1,32 @@
+## Version Pinning & Dependencies
+
+### Flask Backend
+- **Flask**: Pin to `2.3.x` for stability
+- **Flask-CORS**: Pin to `4.0.x` to avoid CORS issues
+- **Requests**: Pin to `2.31.x` for reliable HTTP requests
+- **Python**: Recommend `3.9+` for best compatibility
+
+```bash
+# requirements.txt example
+Flask==2.3.3
+Flask-CORS==4.0.0
+requests==2.31.0
+python-dotenv==1.0.0
+```
+
+### Vite Frontend
+- **Vite**: Pin to `4.x.x` for stability
+- **React**: Pin major version `18.x.x`
+- **TypeScript**: Pin to `5.x.x` if using TS
+
+```json
+// package.json dependencies
+{
+  "vite": "^4.4.5",
+  "react": "^18.2.0",
+  "react-dom": "^18.2.0",
+  "@vitejs/plugin-react": "^4.0.3"
+}
+```
+
+**Note**: Always test version updates in development before deploying to production.

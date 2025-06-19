@@ -1,0 +1,88 @@
+# Agents & Live Data Debugging
+
+## Sample Debugging Commands
+
+### Check Agent Status
+```bash
+# View all running agents
+ps aux | grep python | grep -E "(pump|agent)"
+
+# Check specific agent logs
+tail -f logs/pump_agent.log
+
+# Monitor agent memory usage
+top -p $(pgrep -f "pump_agent")
+```
+
+### Debug Data Pipeline Issues
+```bash
+# Test API connectivity
+curl -X GET "http://localhost:5000/api/health"
+
+# Check live data feed
+curl -X GET "http://localhost:5000/api/live-data?symbol=BTC"
+
+# Validate data format
+python -c "
+import requests
+import json
+response = requests.get('http://localhost:5000/api/live-data')
+print(json.dumps(response.json(), indent=2))
+"
+```
+
+### Agent Performance Monitoring
+```bash
+# Check agent response times
+time curl -X POST "http://localhost:5000/api/agents/analyze" \
+  -H "Content-Type: application/json" \
+  -d '{"data": "sample"}'
+
+# Monitor WebSocket connections
+netstat -an | grep :5000
+
+# Check database connections
+python -c "
+from app import db
+try:
+    db.engine.execute('SELECT 1')
+    print('DB connection: OK')
+except Exception as e:
+    print(f'DB connection failed: {e}')
+"
+```
+
+### Live Data Troubleshooting
+```bash
+# Reset data cache
+curl -X DELETE "http://localhost:5000/api/cache/clear"
+
+# Force data refresh
+curl -X POST "http://localhost:5000/api/data/refresh"
+
+# Check data source connectivity
+python scripts/test_data_sources.py
+
+# Validate data integrity
+python scripts/validate_data.py --check-live
+```
+
+### Agent Communication Debug
+```bash
+# Test inter-agent messaging
+python -c "
+from agents.pump_agent import PumpAgent
+agent = PumpAgent()
+result = agent.test_connection()
+print(f'Agent connection: {result}')
+"
+
+# Monitor agent queues
+python scripts/monitor_queues.py
+
+# Check agent health endpoints
+for port in 5001 5002 5003; do
+  echo "Checking agent on port $port:"
+  curl -f "http://localhost:$port/health" || echo "Agent down"
+done
+```

@@ -1,0 +1,23 @@
+#!/bin/bash
+
+echo "🔧 Cleaning CBPump repo..."
+
+# Remove frontend dependencies
+rm -rf frontend/node_modules
+rm -rf frontend/dist
+
+# Remove backend dependencies
+rm -rf backend/__pycache__
+rm -rf backend/.pytest_cache
+find backend -name "*.pyc" -delete
+
+# Remove general clutter
+find . -name ".DS_Store" -delete
+find . -name "*.zip" -delete
+find . -name "*.tar.gz" -delete
+
+# Optional: Clean Docker containers/images
+echo "🛑 Stopping Docker containers (if running)..."
+docker-compose down
+
+echo "✅ Cleanup complete!"
