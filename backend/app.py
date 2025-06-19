@@ -9,19 +9,69 @@ import requests
 import time
 import threading
 from collections import defaultdict, deque
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 from datetime import datetime
+from config import CONFIG
+from logging_config import setup_logging
+from logging_config import log_config as log_config_with_param
+from utils import find_available_port
 
+# Production-ready imports
+from dotenv import load_dotenv
+try:
+    import sentry_sdk
+    from sentry_sdk.integrations.flask import FlaskIntegration
+    SENTRY_AVAILABLE = True
+except ImportError:
+    SENTRY_AVAILABLE = False
+
+try:
+    from flask_limiter import Limiter
+    from flask_limiter.util import get_remote_address
+    LIMITER_AVAILABLE = True
+except ImportError:
+    LIMITER_AVAILABLE = False
+
+try:
+    from flask_talisman import Talisman
+    TALISMAN_AVAILABLE = True
+except ImportError:
+    TALISMAN_AVAILABLE = False
+
+try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+except ImportError:
+    PSUTIL_AVAILABLE = False
+
+# Load environment variables
+load_dotenv()
+
+# Initialize Sentry for error tracking in production
+if SENTRY_AVAILABLE and os.environ.get('SENTRY_DSN'):
+    sentry_sdk.init(
+        dsn=os.environ.get('SENTRY_DSN'),
+        integrations=[FlaskIntegration()],
+        traces_sample_rate=0.1,
+        environment=os.environ.get('ENVIRONMENT', 'production')
+    )
 # CBMo4ers Crypto Dashboard Backend
 # Data Sources: Public Coinbase Exchange API + CoinGecko (backup)
 # No API keys required - uses public market data only
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Setup logging
+setup_logging()
+
+# Log configuration
+log_config_with_param(CONFIG)
 
 # Flask App Setup
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'crypto-dashboard-secret')
+
+# Add startup time tracking
+startup_time = time.time()
 
 # Configure allowed CORS origins from environment
 cors_env = os.environ.get('CORS_ALLOWED_ORIGINS', '*')
@@ -156,7 +206,7 @@ def update_config(new_config):
 # =============================================================================
 
 def get_coinbase_prices():
-    """Fetch current prices from Coinbase"""
+    """Fetch current prices from Coinbase (optimized for speed)"""
     try:
         products_url = "https://api.exchange.coinbase.com/products"
         products_response = requests.get(products_url, timeout=CONFIG['API_TIMEOUT'])
@@ -164,20 +214,62 @@ def get_coinbase_prices():
             products = products_response.json()
             current_prices = {}
             
-            for product in products:
-                if product.get("quote_currency") == "USD" and product.get("status") == "online":
-                    symbol = product["id"]
-                    ticker_url = f"https://api.exchange.coinbase.com/products/{symbol}/ticker"
-                    try:
-                        ticker_response = requests.get(ticker_url, timeout=3)
-                        if ticker_response.status_code == 200:
-                            ticker_data = ticker_response.json()
-                            price = float(ticker_data.get('price', 0))
-                            if price > 0:
-                                current_prices[symbol] = price
-                    except Exception as ticker_error:
-                        logging.warning(f"Failed to get ticker for {symbol}: {ticker_error}")
-                        continue
+            # Filter to USD pairs only and prioritize major coins
+            usd_products = [p for p in products 
+                          if p.get("quote_currency") == "USD" 
+                          and p.get("status") == "online"]
+            
+            # Prioritize major cryptocurrencies for faster loading
+            major_coins = [
+                'BTC-USD', 'ETH-USD', 'SOL-USD', 'ADA-USD', 'DOT-USD', 
+                'LINK-USD', 'MATIC-USD', 'AVAX-USD', 'ATOM-USD', 'ALGO-USD',
+                'XRP-USD', 'DOGE-USD', 'SHIB-USD', 'UNI-USD', 'AAVE-USD',
+                'BCH-USD', 'LTC-USD', 'ICP-USD', 'HYPE-USD', 'SPX-USD',
+                'SEI-USD', 'PI-USD', 'KAIA-USD', 'INJ-USD', 'ONDO-USD',
+                'CRO-USD', 'FLR-USD', 'WLD-USD', 'POL-USD', 'WBT-USD',
+                'JUP-USD', 'SKY-USD', 'TAO-USD'
+            ]
+            
+            # Reorder products to prioritize major coins
+            prioritized_products = []
+            remaining_products = []
+            
+            for product in usd_products:
+                if product["id"] in major_coins:
+                    prioritized_products.append(product)
+                else:
+                    remaining_products.append(product)
+            
+            # Combine prioritized + remaining, but limit total to 100 for speed
+            all_products = prioritized_products + remaining_products[:100-len(prioritized_products)]
+            
+            # Use ThreadPoolExecutor for concurrent API calls
+            def fetch_ticker(product):
+                """Fetch ticker data for a single product"""
+                symbol = product["id"]
+                ticker_url = f"https://api.exchange.coinbase.com/products/{symbol}/ticker"
+                try:
+                    ticker_response = requests.get(ticker_url, timeout=1.5)
+                    if ticker_response.status_code == 200:
+                        ticker_data = ticker_response.json()
+                        price = float(ticker_data.get('price', 0))
+                        if price > 0:
+                            return symbol, price
+                except Exception as ticker_error:
+                    logging.warning(f"Failed to get ticker for {symbol}: {ticker_error}")
+                return None, None
+
+            # Use ThreadPoolExecutor for faster concurrent API calls
+            with ThreadPoolExecutor(max_workers=10) as executor:
+                # Submit all tasks
+                future_to_product = {executor.submit(fetch_ticker, product): product 
+                                   for product in all_products[:50]}
+                
+                # Collect results as they complete
+                for future in as_completed(future_to_product):
+                    symbol, price = future.result()
+                    if symbol and price:
+                        current_prices[symbol] = price
             
             logging.info(f"Successfully fetched {len(current_prices)} prices from Coinbase")
             return current_prices
@@ -360,7 +452,7 @@ def get_coingecko_24h_top_movers():
         return []
 
 def get_coinbase_24h_top_movers():
-    """Fetch 24h top movers from Coinbase as backup"""
+    """Fetch 24h top movers from Coinbase as backup (OPTIMIZED)"""
     try:
         products_url = "https://api.exchange.coinbase.com/products"
         products_response = requests.get(products_url, timeout=CONFIG['API_TIMEOUT'])
@@ -371,20 +463,22 @@ def get_coinbase_24h_top_movers():
         usd_products = [p for p in products if p["quote_currency"] == "USD" and p["status"] == "online"]
         formatted_data = []
 
-        for product in usd_products[:50]:
+        def fetch_product_data(product):
+            """Fetch stats and ticker data for a single product concurrently"""
             try:
                 # Get 24h stats
                 stats_url = f"https://api.exchange.coinbase.com/products/{product['id']}/stats"
-                stats_response = requests.get(stats_url, timeout=5)
+                stats_response = requests.get(stats_url, timeout=3)
                 if stats_response.status_code != 200:
-                    continue
-                stats_data = stats_response.json()
+                    return None
 
                 # Get current price
                 ticker_url = f"https://api.exchange.coinbase.com/products/{product['id']}/ticker"
-                ticker_response = requests.get(ticker_url, timeout=3)
+                ticker_response = requests.get(ticker_url, timeout=2)
                 if ticker_response.status_code != 200:
-                    continue
+                    return None
+
+                stats_data = stats_response.json()
                 ticker_data = ticker_response.json()
 
                 current_price = float(ticker_data.get('price', 0))
@@ -400,7 +494,7 @@ def get_coinbase_24h_top_movers():
                     
                     # Only include significant moves
                     if abs(price_change_24h) >= CONFIG['MIN_CHANGE_THRESHOLD'] and volume_24h > CONFIG['MIN_VOLUME_THRESHOLD']:
-                        formatted_data.append({
+                        return {
                             "symbol": product["id"],
                             "current_price": current_price,
                             "initial_price_24h": open_24h,
@@ -409,12 +503,22 @@ def get_coinbase_24h_top_movers():
                             "price_change_1h": price_change_1h,
                             "volume_24h": volume_24h,
                             "market_cap": 0
-                        })
+                        }
             except Exception as e:
                 logging.warning(f"Error processing Coinbase 24h data for {product['id']}: {e}")
-                continue
+                return None
 
-            time.sleep(0.05)  # Rate limiting
+        # Use ThreadPoolExecutor for concurrent API calls (SPEED OPTIMIZATION)
+        with ThreadPoolExecutor(max_workers=15) as executor:
+            # Submit all tasks
+            future_to_product = {executor.submit(fetch_product_data, product): product 
+                               for product in usd_products[:30]}  # Reduced to 30 for faster response
+            
+            # Collect results as they complete
+            for future in as_completed(future_to_product):
+                result = future.result()
+                if result:
+                    formatted_data.append(result)
 
         # Sort and mix gainers/losers
         formatted_data.sort(key=lambda x: abs(x["price_change_24h"]), reverse=True)
@@ -439,9 +543,24 @@ def get_coinbase_24h_top_movers():
 # DATA FORMATTING FUNCTIONS
 # =============================================================================
 
-def process_product_data(product, stats_data, ticker_data):
-    # your implementation here
-    pass
+def process_product_data(products, stats_data, ticker_data):
+    """Process a list of products and combine with stats and ticker data."""
+    processed_data = []
+    for product in products:
+        symbol = product.get("id")
+        if symbol and symbol in stats_data and symbol in ticker_data:
+            try:
+                processed_data.append({
+                    "symbol": symbol,
+                    "base": product.get("base_currency"),
+                    "quote": product.get("quote_currency"),
+                    "volume": float(stats_data[symbol].get("volume", 0)),
+                    "price": float(ticker_data[symbol].get("price", 0)),
+                })
+            except (ValueError, TypeError) as e:
+                logging.warning(f"Could not process data for {symbol}: {e}")
+                continue
+    return processed_data
 
 def format_crypto_data(crypto_data):
     """Format 3-minute crypto data for frontend with detailed price tracking"""
@@ -1077,6 +1196,9 @@ def get_top_movers_bar():
 # EXISTING ENDPOINTS (Updated root to show new individual endpoints)
 # =============================================================================
 
+# Add startup time tracking
+# Add startup time tracking for uptime calculation
+
 @app.route('/')
 def root():
     """Root endpoint"""
@@ -1296,22 +1418,72 @@ def update_config_endpoint():
 
 @app.route('/api/health')
 def health_check():
-    """Health check endpoint with detailed status"""
+    """Comprehensive health check endpoint for monitoring"""
     try:
-        # Test API connectivity
-        test_response = requests.get("https://api.coingecko.com/api/v3/ping", timeout=5)
-        api_status = "healthy" if test_response.status_code == 200 else "degraded"
-    except:
-        api_status = "unhealthy"
-    
+        # Test primary API connectivity
+        coinbase_status = "unknown"
+        coingecko_status = "unknown"
+        
+        try:
+            coinbase_response = requests.get("https://api.exchange.coinbase.com/products", timeout=5)
+            coinbase_status = "up" if coinbase_response.status_code == 200 else "down"
+        except:
+            coinbase_status = "down"
+            
+        try:
+            coingecko_response = requests.get("https://api.coingecko.com/api/v3/ping", timeout=5)
+            coingecko_status = "up" if coingecko_response.status_code == 200 else "down"
+        except:
+            coingecko_status = "down"
+        
+        # Determine overall health
+        overall_status = "healthy"
+        if coinbase_status == "down" and coingecko_status == "down":
+            overall_status = "unhealthy"
+        elif coinbase_status == "down" or coingecko_status == "down":
+            overall_status = "degraded"
+            
+        return jsonify({
+            "status": overall_status,
+            "timestamp": datetime.now().isoformat(),
+            "version": "3.0.0",
+            "uptime": time.time() - startup_time,
+            "cache_status": {
+                "data_cached": cache["data"] is not None,
+                "last_update": cache["timestamp"],
+                "cache_age_seconds": time.time() - cache["timestamp"] if cache["timestamp"] > 0 else 0,
+                "ttl": cache["ttl"]
+            },
+            "external_apis": {
+                "coinbase": coinbase_status,
+                "coingecko": coingecko_status
+            },
+            "data_tracking": {
+                "symbols_tracked": len(price_history),
+                "max_history_per_symbol": CONFIG.get('MAX_PRICE_HISTORY', 100)
+            }
+        }), 200 if overall_status == "healthy" else 503
+    except Exception as e:
+        logging.error(f"Health check error: {e}")
+        return jsonify({
+            "status": "unhealthy",
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }), 503
+
+@app.route('/api/server-info')
+def server_info():
+    """Get server information including port and status"""
     return jsonify({
-        "status": "healthy",
-        "timestamp": datetime.now().isoformat(),
-        "config": CONFIG,
-        "api_status": api_status,
-        "cache_age": time.time() - cache["timestamp"] if cache["timestamp"] > 0 else None,
-        "symbols_tracked": len(price_history),
-        "version": "2.0.0"
+        "port": CONFIG['PORT'],
+        "host": CONFIG['HOST'],
+        "debug": CONFIG['DEBUG'],
+        "status": "running",
+        "cors_origins": cors_origins,
+        "cache_ttl": CONFIG['CACHE_TTL'],
+        "update_interval": CONFIG['UPDATE_INTERVAL'],
+        "version": "3.0.0",
+        "timestamp": datetime.now().isoformat()
     })
 
 @app.route('/api/clear-cache', methods=['POST'])
@@ -1329,8 +1501,6 @@ def clear_cache():
     logging.info("Cache and price history cleared")
     return jsonify({"message": "Cache cleared successfully"})
 
-# =============================================================================
-# BACKGROUND UPDATES (No SocketIO - using REST polling)
 # =============================================================================
 
 def background_crypto_updates():
@@ -1394,10 +1564,12 @@ if __name__ == '__main__':
         kill_process_on_port(target_port)
         time.sleep(2)  # Wait for process to be killed
     
-    if args.auto_port:
+    # Always try to find available port (auto-port by default)
+    if args.auto_port or not args.port:
         available_port = find_available_port(target_port)
         if available_port:
             CONFIG['PORT'] = available_port
+            logging.info(f"Using available port: {available_port}")
         else:
             logging.error("Could not find available port")
             exit(1)
