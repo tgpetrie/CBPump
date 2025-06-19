@@ -64,7 +64,7 @@ const PriceBanner = ({ data }) => {
           <div className="flex animate-scroll whitespace-nowrap">
             {/* First set of data */}
             {data.map((coin, index) => (
-              <div key={`first-${coin.symbol}`} className="flex-shrink-0 mx-8">
+              <div key={`first-${coin.symbol}-${index}`} className="flex-shrink-0 mx-8">
                 <a 
                   href={`https://www.coinbase.com/price/${coin.symbol.split('-')[0].toLowerCase()}`} 
                   target="_blank"
@@ -82,16 +82,13 @@ const PriceBanner = ({ data }) => {
                   }`}>
                     <span>{(coin.price_change_1h || 0) >= 0 ? '🚀' : '📉'}</span>
                     1h: {(coin.price_change_1h || 0) >= 0 ? '+' : ''}{formatDecimal(Math.abs(coin.price_change_1h || 0))}%
-                  </div>
-                  <div className="text-xs text-gray-400">
-                    24h: {(coin.price_change_24h || 0) >= 0 ? '+' : ''}{formatDecimal(Math.abs(coin.price_change_24h || 0))}%
                   </div>
                 </a>
               </div>
             ))}
             {/* Duplicate set for seamless scrolling */}
             {data.map((coin, index) => (
-              <div key={`second-${coin.symbol}`} className="flex-shrink-0 mx-8">
+              <div key={`second-${coin.symbol}-${index}`} className="flex-shrink-0 mx-8">
                 <a 
                   href={`https://www.coinbase.com/price/${coin.symbol.split('-')[0].toLowerCase()}`} 
                   target="_blank"
@@ -109,9 +106,6 @@ const PriceBanner = ({ data }) => {
                   }`}>
                     <span>{(coin.price_change_1h || 0) >= 0 ? '🚀' : '📉'}</span>
                     1h: {(coin.price_change_1h || 0) >= 0 ? '+' : ''}{formatDecimal(Math.abs(coin.price_change_1h || 0))}%
-                  </div>
-                  <div className="text-xs text-gray-400">
-                    24h: {(coin.price_change_24h || 0) >= 0 ? '+' : ''}{formatDecimal(Math.abs(coin.price_change_24h || 0))}%
                   </div>
                 </a>
               </div>
@@ -142,7 +136,7 @@ const VolumeBanner = ({ data }) => {
           <div className="flex animate-scroll whitespace-nowrap">
             {/* First set of data */}
             {data.map((coin, index) => (
-              <div key={`first-${coin.symbol}`} className="flex-shrink-0 mx-8">
+              <div key={`first-${coin.symbol}-${index}`} className="flex-shrink-0 mx-8">
                 <a 
                   href={`https://www.coinbase.com/price/${coin.symbol.split('-')[0].toLowerCase()}`} 
                   target="_blank"
@@ -169,7 +163,7 @@ const VolumeBanner = ({ data }) => {
             ))}
             {/* Duplicate set for seamless scrolling */}
             {data.map((coin, index) => (
-              <div key={`second-${coin.symbol}`} className="flex-shrink-0 mx-8">
+              <div key={`second-${coin.symbol}-${index}`} className="flex-shrink-0 mx-8">
                 <a 
                   href={`https://www.coinbase.com/price/${coin.symbol.split('-')[0].toLowerCase()}`} 
                   target="_blank"
@@ -274,7 +268,7 @@ const CryptoTable = ({ title, data, variant = "default" }) => (
         </thead>
         <tbody className="divide-y divide-gray-800/30">
           {data.map((coin, index) => 
-            <CryptoRow key={coin.symbol} coin={coin} index={index} />
+            <CryptoRow key={`${coin.symbol}-${index}`} coin={coin} index={index} />
           )}
         </tbody>
       </table>
