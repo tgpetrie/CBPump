@@ -4,7 +4,13 @@ import types
 import unittest
 
 # Import missing functions from app.py
-from app import calculate_interval_changes, format_crypto_data, process_product_data, price_history
+from app import (
+    calculate_interval_changes,
+    format_crypto_data,
+    format_table_data,
+    process_product_data,
+    price_history,
+)
 
 # Update mocking strategy
 import flask
@@ -70,6 +76,32 @@ class TestFormatCryptoData(unittest.TestCase):
         'interval_minutes': 3.0,
     }
 ]
+        self.assertEqual(result, expected)
+
+
+class TestFormatTableData(unittest.TestCase):
+    def test_format_table_data_matches_style(self):
+        coins = [
+            {
+                'symbol': 'BTC-USD',
+                'current': 110.0,
+                'initial_3min': 100.0,
+                'gain': 10.0,
+                'interval_minutes': 3.0,
+            }
+        ]
+
+        result = format_table_data(coins)
+        expected = [
+            {
+                'rank': 1,
+                'symbol': 'BTC-USD',
+                'current': 110.0,
+                'initial_3min': 100.0,
+                'gain': 10.0,
+                'interval_minutes': 3.0,
+            }
+        ]
         self.assertEqual(result, expected)
 
 
