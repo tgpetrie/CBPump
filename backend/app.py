@@ -591,6 +591,21 @@ def format_banner_data(banner_data):
         for coin in banner_data
     ]
 
+def format_table_data(coins):
+    """Format gainers/losers table data using the same style as 1-minute data."""
+    table_data = []
+    for i, coin in enumerate(coins[:20]):
+        table_data.append({
+            "rank": i + 1,
+            "symbol": coin["symbol"],
+            "current": coin["current"],
+            "initial_3min": coin["initial_3min"],
+            "gain": coin["gain"],
+            "interval_minutes": coin.get("interval_minutes", 3),
+        })
+
+    return table_data
+
 # =============================================================================
 # MAIN DATA PROCESSING FUNCTION
 # =============================================================================
@@ -1087,23 +1102,9 @@ def get_gainers_table():
         data = get_crypto_data()
         if not data:
             return jsonify({"error": "No data available"}), 503
-            
         gainers = data.get('gainers', [])
-        
-        # Enhanced formatting specifically for gainers table
-        gainers_table_data = []
-        for i, coin in enumerate(gainers[:20]):  # Top 20 gainers
-            gainers_table_data.append({
-                "rank": i + 1,
-                "symbol": coin["symbol"],
-                "current_price": coin["current"],  # Use correct field name
-                "price_change_percentage_3min": coin["gain"],  # Use correct field name
-                "initial_price_3min": coin["initial_3min"],  # Use correct field name
-                "actual_interval_minutes": coin.get("interval_minutes", 3),  # Use correct field name
-                "momentum": "strong" if coin["gain"] > 5 else "moderate",
-                "alert_level": "high" if coin["gain"] > 10 else "normal"
-            })
-        
+        gainers_table_data = format_table_data(gainers)
+
         return jsonify({
             "component": "gainers_table",
             "data": gainers_table_data,
@@ -1124,23 +1125,9 @@ def get_losers_table():
         data = get_crypto_data()
         if not data:
             return jsonify({"error": "No data available"}), 503
-            
         losers = data.get('losers', [])
-        
-        # Enhanced formatting specifically for losers table
-        losers_table_data = []
-        for i, coin in enumerate(losers[:20]):  # Top 20 losers
-            losers_table_data.append({
-                "rank": i + 1,
-                "symbol": coin["symbol"],
-                "current_price": coin["current"],  # Use correct field name
-                "price_change_percentage_3min": coin["gain"],  # Use correct field name (negative for losers)
-                "initial_price_3min": coin["initial_3min"],  # Use correct field name
-                "actual_interval_minutes": coin.get("interval_minutes", 3),  # Use correct field name
-                "momentum": "strong" if coin["gain"] < -5 else "moderate",
-                "alert_level": "high" if coin["gain"] < -10 else "normal"
-            })
-        
+        losers_table_data = format_table_data(losers)
+
         return jsonify({
             "component": "losers_table",
             "data": losers_table_data,
